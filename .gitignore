@@ -1,0 +1,12 @@
+# Build output
+/build/
+/Common/build/
+/.gradle/
+/Common/.cxx/
+
+# Prebuilt native libraries fetched by scripts/fetch-prebuilt-libs.sh from a
+# released APK; see the BUILD section of README.md. They are not part of this
+# repository.
+/Common/src/main/jniLibs/
+/Common/src/mobileSi/jniLibs/
+/Common/src/wearSi/jniLibs/
