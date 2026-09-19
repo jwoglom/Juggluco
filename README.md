@@ -40,3 +40,12 @@ To build a logging mobile phone release version, do the following from the Juggl
 
 ./gradlew assembleMobileLibre3SiDexNogoogleReleaseLog
 
+
+
+Instead of unzipping an apk by hand, these libraries can be downloaded and put in place with:
+
+./scripts/fetch-prebuilt-libs.sh
+
+It takes the libraries from the released `Juggluco-11.1.0.apk`. Another release can be used with `./scripts/fetch-prebuilt-libs.sh 11.0.2`, or another apk altogether with `JUGGLUCO_APK_URL=...  ./scripts/fetch-prebuilt-libs.sh`. The libraries are not part of this repository and the directories they are written to are in .gitignore.
+
+<h4>GitHub Actions</h4>.github/workflows/build.yml does the above in CI: it checks out the submodules, installs libicu-dev (needed for the rtlpp host tool of the native build) and the NDK and CMake version from Common/build.gradle, runs scripts/fetch-prebuilt-libs.sh to download and extract the native libraries, builds `assembleMobileLibre3SiDexNogoogleReleaseLog` and uploads the apks as a build artifact. It runs on every push and pull request, and can be started by hand from the Actions tab, where another gradle task and another release to take the libraries from can be filled in.
