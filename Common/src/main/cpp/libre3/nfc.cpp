@@ -107,6 +107,21 @@ extern "C" JNIEXPORT jint JNICALL fromjava(logLibre3PatchInfo)(JNIEnv *env, jcla
 	return static_cast<jint>(first.nfcptr->sec_version);
 	}
 
+/*
+ * Read-only classifier: return the patch info's productType (a family
+ * discriminator: FreeStyle Libre 3 reports 4, Abbott Lingo reports 9), or -1
+ * when the response cannot be parsed.  Reads only the already-fetched patch
+ * info; writes nothing to the sensor.
+ */
+extern "C" JNIEXPORT jint JNICALL fromjava(libre3PatchProductType)(JNIEnv *env, jclass thiz, jbyteArray nfc1ar) {
+	nfc1 first(env,nfc1ar);
+	if(first.error) {
+		LOGAR("libre3PatchProductType: could not parse patch info");
+		return -1;
+		}
+	return static_cast<jint>(first.nfcptr->producttype);
+	}
+
 
 
 

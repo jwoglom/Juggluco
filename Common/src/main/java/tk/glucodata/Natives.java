@@ -619,6 +619,9 @@ public static native int startTimeIDsum(byte[] uit, long time, long accountID);
 /** Decode and log the Libre 3 family patch info read over NFC, without writing
  * to the sensor. Returns the security version, or -1 if it cannot be parsed. */
 public static native int logLibre3PatchInfo(byte[] patchInfo);
+/** Return the patch info's productType (FreeStyle Libre 3 = 4, Abbott Lingo = 9),
+ * or -1 if it cannot be parsed. Reads only the already-fetched patch info. */
+public static native int libre3PatchProductType(byte[] patchInfo);
 
 
 
