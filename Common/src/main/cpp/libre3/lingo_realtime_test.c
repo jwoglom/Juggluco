@@ -87,11 +87,12 @@ int main(void) {
             ok = 0; printf("[%s] lifeCount %u != %u\n", v->name, r.life_count, v->expect_life_count);
         }
         /* Channel 0 = Glucose, channel 1 = Inactive (confirmed from the app). */
-        if (r.channel0_type != LINGO_ANALYTE_GLUCOSE) {
-            ok = 0; printf("[%s] ch0 type %u != GLUCOSE\n", v->name, r.channel0_type);
+        /* This sensor reports ch0=INACTIVE, ch1=GLUCOSE (typemap 0x10). */
+        if (r.channel0_type != LINGO_ANALYTE_INACTIVE) {
+            ok = 0; printf("[%s] ch0 type %u != INACTIVE\n", v->name, r.channel0_type);
         }
-        if (r.channel1_type != LINGO_ANALYTE_INACTIVE) {
-            ok = 0; printf("[%s] ch1 type %u != INACTIVE\n", v->name, r.channel1_type);
+        if (r.channel1_type != LINGO_ANALYTE_GLUCOSE) {
+            ok = 0; printf("[%s] ch1 type %u != GLUCOSE\n", v->name, r.channel1_type);
         }
         /* Warm-up: glucose must be reported invalid, never as a number. */
         if (r.glucose_valid) {
@@ -124,10 +125,30 @@ int main(void) {
         lingo_realtime_t r;
         int rc = lingo_parse_realtime(buf, len, &r);
         int ok = (rc == 0 && r.life_count == v->expect_life_count &&
-                  r.channel0_type == LINGO_ANALYTE_GLUCOSE &&
+                  r.channel1_type == LINGO_ANALYTE_GLUCOSE &&
                   r.glucose_valid && r.glucose_mgdl == 201);
-        printf("[%s] lifeCount=%u glucose_valid=%d mgdl=%u : %s\n",
-               v->name, r.life_count, r.glucose_valid, r.glucose_mgdl, ok ? "OK" : "FAIL");
+        printf("[%s] lifeCount=%u ch1=%u glucose_valid=%d mgdl=%u : %s\n",
+               v->name, r.life_count, r.channel1_type, r.glucose_valid, r.glucose_mgdl,
+               ok ? "OK" : "FAIL");
+        if (!ok) failures++;
+    }
+
+    /* General channel selection: glucose in channel 0. Take the warmed-up lc63
+     * frame and move its valid glucose word (0x40c9) from the ch1 block (@19) to
+     * the ch0 block (@4), and set the type map to ch0=GLUCOSE, ch1=INACTIVE
+     * (0x01). The decoder must read glucose from ch0 now. */
+    {
+        uint8_t buf[64];
+        size_t len = unhex(WARM[1].hex, buf, sizeof(buf));
+        buf[4]  = buf[19]; buf[5]  = buf[20];   /* copy cappedReading to ch0 block */
+        buf[19] = 0x00;    buf[20] = 0x80;      /* ch1 cappedReading -> invalid */
+        buf[34] = 0x01;                          /* ch0=GLUCOSE(1), ch1=INACTIVE(0) */
+        lingo_realtime_t r;
+        int rc = lingo_parse_realtime(buf, len, &r);
+        int ok = (rc == 0 && r.channel0_type == LINGO_ANALYTE_GLUCOSE &&
+                  r.glucose_valid && r.glucose_mgdl == 201);
+        printf("[ch0-glucose] ch0=%u glucose_valid=%d mgdl=%u : %s\n",
+               r.channel0_type, r.glucose_valid, r.glucose_mgdl, ok ? "OK" : "FAIL");
         if (!ok) failures++;
     }
 

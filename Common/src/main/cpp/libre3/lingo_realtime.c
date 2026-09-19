@@ -24,27 +24,38 @@
  *
  *   @0    uint16 LE  lifeCount
  *   @2    uint16 LE  historicLifeCount
+ *   @4    15 bytes   analyte block, channel 0
+ *   @19   15 bytes   analyte block, channel 1
  *   @34   uint8      analyte-type map: low nibble = ch0 type, high nibble = ch1 type
  *   @37   uint16 LE  temperature (1/100 degC, 0x8000 = invalid)
  *
- * Current glucose cappedReading, uint16 LE at offset 0x13 (=19):
+ * Glucose is reported in whichever channel's type == GLUCOSE. Within an analyte
+ * block (offsets relative to its start), cappedReading is at RESULT_CAPPED (0):
  *   value & 0x0FFF        -> reading, mg/dL (scale 1)
  *   (value & 0x6000) >> 13 -> result range
  *   value & 0x8000        -> data-quality / invalid flag
  *
- * The glucose offset (0x13) and its bit layout are confirmed on a real, warmed-up
- * decode (177 mg/dL; see lingo-apk BREAK_CONFIRMED.md) and against the warm-up
- * captures in lingo_realtime_test.c.  The full per-analyte sub-block layout in
- * LINGO_PROTOCOL.md section 7 is not reproduced here: only the fields verified
- * against real captures are decoded, so nothing unverified reaches a reading.
+ * These offsets, the channel iteration, the analyte type codes and the bit layout
+ * are taken verbatim from the decompiled GlucoseKetoneSPL.parseOneMinuteISFReading /
+ * parseAnalyte / parseMeasurement, and the glucose value is validated against real
+ * warmed-up captures (201 mg/dL, matching the Lingo app) in lingo_realtime_test.c.
+ * Only glucose + temperature are decoded here; the other per-analyte fields
+ * (rate, projected, historic, uncapped) have known offsets, below, but are not
+ * emitted until validated against real non-warm-up values.
  */
 #define OFF_LIFECOUNT        0
 #define OFF_HIST_LIFECOUNT   2
 #define OFF_TYPEMAP          34
 #define OFF_TEMPERATURE      37
 
-/* Confirmed current-glucose cappedReading offset (0x13). */
-#define OFF_CURRENT_GLUCOSE  0x13
+#define FIRST_ANALYTE_OFFSET 4
+#define ANALYTE_LEN          15
+
+/* Analyte-block-relative field offsets (GlucoseKetoneSPL constants). Only
+ * RESULT_CAPPED is consumed today; the rest are recorded for future use.
+ *   RESULT_CAPPED=0 RATE_OF_CHANGE=2 EXTENDED_CODE=4 PROJECTED=6
+ *   HISTORIC_CAPPED=8 ACTIONABLE_TREND=10 RESULT_UNCAPPED=11 HISTORIC_UNCAPPED=13 */
+#define ANALYTE_RESULT_CAPPED 0
 
 #define READING_MASK      0x0FFFu
 #define DATA_QUALITY_FLAG 0x8000u
@@ -65,17 +76,22 @@ int lingo_parse_realtime(const uint8_t *plain, size_t len, lingo_realtime_t *out
     out->channel0_type = (uint8_t)(typemap & 0x0F);
     out->channel1_type = (uint8_t)((typemap >> 4) & 0x0F);
 
-    /* Glucose is reported on channel 0 on every observed Lingo frame; require it
-     * so a future variant that moves glucose elsewhere is treated as invalid
-     * rather than silently mis-read. */
+    /* Find the channel whose analyte type is GLUCOSE and read its cappedReading
+     * from that channel's own block (ch0 @4, ch1 @19), matching the app's
+     * parseOneMinuteISFReading. This is correct regardless of which channel
+     * carries glucose. */
     out->glucose_valid = false;
     out->glucose_mgdl = 0;
-    if (out->channel0_type == LINGO_ANALYTE_GLUCOSE) {
-        const uint16_t capped = rd_u16le(plain + OFF_CURRENT_GLUCOSE);
+    for (int ch = 0; ch < 2; ch++) {
+        const uint8_t type = (ch == 0) ? out->channel0_type : out->channel1_type;
+        if (type != LINGO_ANALYTE_GLUCOSE) continue;
+        const int start = FIRST_ANALYTE_OFFSET + ch * ANALYTE_LEN;
+        const uint16_t capped = rd_u16le(plain + start + ANALYTE_RESULT_CAPPED);
         if ((capped & DATA_QUALITY_FLAG) == 0) {
             out->glucose_valid = true;
             out->glucose_mgdl = (uint16_t)(capped & READING_MASK);
         }
+        break;
     }
 
     const uint16_t temp = rd_u16le(plain + OFF_TEMPERATURE);

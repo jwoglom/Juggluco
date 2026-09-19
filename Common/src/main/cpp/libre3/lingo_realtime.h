@@ -53,12 +53,14 @@ extern "C" {
 /* Decrypted realtime plaintext length (PATCH_ISF_RESPONSE_LEN in the app). */
 #define LINGO_REALTIME_LEN 51
 
-/* Analyte type codes packed into the type-map byte (LINGO_PROTOCOL.md section 7).
- * Confirmed against the Lingo app's own state (measurements=[Glucose, Inactive]).
- */
+/* Analyte type codes packed into the type-map byte, from the decompiled
+ * GKAnalyteType (INACTIVE=0, GLUCOSE=1, KETONE=2, LACTATE=3). The low nibble is
+ * channel 0, the high nibble is channel 1 (GlucoseKetoneSPL.parseOneMinuteISFReading). */
 enum {
-    LINGO_ANALYTE_GLUCOSE  = 0,
-    LINGO_ANALYTE_INACTIVE = 1
+    LINGO_ANALYTE_INACTIVE = 0,
+    LINGO_ANALYTE_GLUCOSE  = 1,
+    LINGO_ANALYTE_KETONE   = 2,
+    LINGO_ANALYTE_LACTATE  = 3
 };
 
 typedef struct {
