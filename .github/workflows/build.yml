@@ -1,7 +1,11 @@
 name: Build
 
 on:
+  # Only the default branch, so that a push to a branch with a pull request
+  # gives a single run, the pull_request one, instead of two.
   push:
+    branches:
+      - primary
   pull_request:
   workflow_dispatch:
     inputs:
