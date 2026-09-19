@@ -616,6 +616,9 @@ public static native void showbytes(String mess,byte[] ar);
 //public static native boolean loadECDHCrypto( );
 //public static native boolean loadNFC( );
 public static native int startTimeIDsum(byte[] uit, long time, long accountID);
+/** Decode and log the Libre 3 family patch info read over NFC, without writing
+ * to the sensor. Returns the security version, or -1 if it cannot be parsed. */
+public static native int logLibre3PatchInfo(byte[] patchInfo);
 
 
 

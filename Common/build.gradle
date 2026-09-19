@@ -133,6 +133,14 @@ android {
         buildConfigField 'int', 'isRelease', '0'
         buildConfigField 'int', 'isReleaseID', '0'
 
+        // Diagnostic build flag, off unless -PnfcProbeOnly=1 is passed. When on,
+        // an NFC scan of a Libre 3 family sensor reads and logs the patch info
+        // and then stops, without sending the activation command. Used to read
+        // the securityVersion of an unknown sensor variant without activating
+        // it, since a wrong activation cannot be undone.
+        buildConfigField 'int', 'nfcProbeOnly',
+            (project.findProperty('nfcProbeOnly') == '1' ? '1' : '0')
+
         externalNativeBuild {
             cmake {
                 version "$CMAKEVERSION"

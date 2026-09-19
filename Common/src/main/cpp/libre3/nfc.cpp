@@ -91,6 +91,22 @@ nfcptr->producttype
 
 static_assert(sizeof(firstnfc)==26);
 
+/*
+ * Read-only probe helper.  Decodes and logs the patch info returned by the
+ * 0x02 0xA1 0x7A command without writing anything to the sensor, so that the
+ * security version of an unknown Libre 3 family sensor can be established
+ * before an activation is attempted.  Returns the security version, or -1
+ * when the response cannot be parsed.
+ */
+extern "C" JNIEXPORT jint JNICALL fromjava(logLibre3PatchInfo)(JNIEnv *env, jclass thiz, jbyteArray nfc1ar) {
+	nfc1 first(env,nfc1ar);
+	if(first.error) {
+		LOGAR("logLibre3PatchInfo: could not parse patch info");
+		return -1;
+		}
+	return static_cast<jint>(first.nfcptr->sec_version);
+	}
+
 
 
 

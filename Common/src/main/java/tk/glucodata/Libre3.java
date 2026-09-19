@@ -25,6 +25,7 @@ package tk.glucodata;
 import android.nfc.Tag;
 
 import static tk.glucodata.BuildConfig.libreVersion;
+import static tk.glucodata.BuildConfig.nfcProbeOnly;
 import static tk.glucodata.Log.doLog;
 import static tk.glucodata.Log.showbytes;
 
@@ -47,6 +48,23 @@ public static	long   	libre3NFC(Tag tag) {
         return 2L;
         }
 	if(libreVersion == 3) {
+		if(doLog||nfcProbeOnly==1) {
+			// Decodes and logs securityVersion, productType, patchState,
+			// warmup, wearDuration and serial. Read-only: the patch info has
+			// already been read above, nothing is written to the sensor.
+			final int secVersion=Natives.logLibre3PatchInfo(res);
+			final String summary="patch info securityVersion="+secVersion;
+			Log.i(LOG_ID,summary);
+			android.util.Log.i(LOG_ID,summary);
+			}
+		if(nfcProbeOnly==1) {
+			// Probe build: stop before the activation write, so that scanning
+			// an unknown sensor cannot burn it.
+			final String msg="nfcProbeOnly: not activating this sensor";
+			Log.i(LOG_ID,msg);
+			android.util.Log.i(LOG_ID,msg);
+			return 2L;
+			}
 		long streamptr=tk.glucodata.libre3.NFC.second(res,tag);
 //		SensorBluetooth.resetDevice(streamptr);
 		{if(doLog) {Log.i(LOG_ID,"streamptr="+streamptr);};};

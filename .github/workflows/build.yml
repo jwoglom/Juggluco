@@ -17,6 +17,10 @@ on:
         description: Released Juggluco version to take the prebuilt native libraries from
         default: '11.1.0'
         type: string
+      build_probe:
+        description: Also build the read-only NFC patch-info probe APK
+        default: true
+        type: boolean
 
 env:
   # The task from the BUILD section of README.md: a logging mobile phone
@@ -25,6 +29,11 @@ env:
   # Release whose APK the native libraries that are not part of this
   # repository are taken from, see scripts/fetch-prebuilt-libs.sh.
   JUGGLUCO_LIBS_VERSION: ${{ inputs.libs_version || '11.1.0' }}
+  # Whether to also build the -PnfcProbeOnly=1 diagnostic APK. On for push and
+  # pull_request; workflow_dispatch can turn it off. Tested on github.event_name
+  # rather than on inputs.build_probe alone, because for the other two events the
+  # input is unset and an unset input compares equal to false.
+  BUILD_PROBE: ${{ github.event_name != 'workflow_dispatch' || inputs.build_probe }}
   # Matches ndkver, CMAKEVERSION and compileSdk in Common/build.gradle.
   NDK_VERSION: '30.0.16138531'
   CMAKE_VERSION: '4.1.2'
@@ -112,4 +121,35 @@ jobs:
           path: |
             Common/build/outputs/apk/**/*.apk
             Common/build/outputs/mapping/**/mapping.txt
+          if-no-files-found: error
+
+      # A second APK of the same task with BuildConfig.nfcProbeOnly == 1. An NFC
+      # scan of a Libre 3 family sensor then reads the patch info, logs the
+      # decoded securityVersion / productType / patchState / serial, and stops
+      # before the activation write. It is the safe way to identify an unknown
+      # sensor variant, because activating one with the wrong parameters cannot
+      # be undone. Only the Java pipeline is rebuilt, the native build is reused.
+      - name: Build the NFC probe APK
+        if: env.BUILD_PROBE == 'true'
+        run: ./gradlew --no-daemon --stacktrace -PnfcProbeOnly=1 "$TASK"
+
+      - name: Collect the NFC probe APK
+        if: env.BUILD_PROBE == 'true'
+        run: |
+          # The probe reuses the task's output paths, so move it aside under a
+          # name that cannot be confused with the normal build. It carries the
+          # same applicationId, so only one of the two can be installed at once.
+          mkdir -p build/nfc-probe
+          find Common/build/outputs/apk -name '*.apk' -print0 |
+            while IFS= read -r -d '' apk; do
+              cp "$apk" "build/nfc-probe/nfcprobe-$(basename "$apk")"
+            done
+          ls -l build/nfc-probe
+
+      - name: Upload the NFC probe APK
+        if: env.BUILD_PROBE == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: juggluco-nfcprobe-${{ env.TASK }}
+          path: build/nfc-probe/*.apk
           if-no-files-found: error
