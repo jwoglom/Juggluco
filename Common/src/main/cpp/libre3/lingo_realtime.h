@@ -33,9 +33,10 @@
  * injection) exists.
  *
  * Field layout is reproduced from the decompiled Lingo app and confirmed byte
- * for byte against captured frames; every value carries the sensor's own
- * data-quality flag so an invalid or warm-up reading is never reported as a
- * number.
+ * for byte against captured frames, including real warmed-up readings that match
+ * the Lingo app's own displayed glucose (see lingo_realtime_test.c); every value
+ * carries the sensor's own data-quality flag so an invalid or warm-up reading is
+ * never reported as a number.
  */
 
 #ifndef LINGO_REALTIME_H

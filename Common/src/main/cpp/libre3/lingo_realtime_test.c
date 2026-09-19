@@ -26,8 +26,9 @@
  * must report glucose_valid == false for all of them while still recovering the
  * structural fields (lifeCount, analyte-type map, temperature-invalid).  This is
  * exactly the safety property we want: warm-up data is never reported as a
- * number.  Wired-up validation of a real (non-warm-up) glucose value awaits a
- * warmed-up capture.
+ * number.  The WARM[] vectors below are real frames from the same sensor after
+ * it warmed up; they decode to 201 mg/dL, matching the value the Lingo app
+ * displayed, validating the value path on real (non-warm-up) data.
  *
  * Build and run on the host:
  *   cc -DLINGO_REALTIME_SELFTEST -std=c11 -Wall -Wextra \
@@ -107,20 +108,26 @@ int main(void) {
         if (!ok) failures++;
     }
 
-    /* Synthetic warmed-up frame: clear the data-quality bit on the current
-     * glucose field (offset 0x13) and set a plausible 120 mg/dL, to prove value
-     * decoding. */
-    {
+    /* Real warmed-up frames captured from the same sensor once it started
+     * reporting glucose.  The Lingo app displayed 201 mg/dL at lifeCount 63;
+     * these decode to the same value, proving the value path on real data (not
+     * just structure).  raw@0x13 = 0x40c9: data-quality bit clear (valid),
+     * result-range bits 0x4000, reading 0x0c9 = 201. */
+    static const struct vec WARM[] = {
+        {"warm lc58", "3a002800008000800000ffff00800800800080c94000800000ffff008008c9000080100000d30c7000b808764de60e00000000", 58},
+        {"warm lc63", "3f002d00008000800000ffff00800800800080c94000800000ffff008008d0000080100000b90c70000109e14ced0e00000000", 63},
+    };
+    for (size_t i = 0; i < sizeof(WARM) / sizeof(WARM[0]); i++) {
+        const struct vec *v = &WARM[i];
         uint8_t buf[64];
-        size_t len = unhex(VECTORS[0].hex, buf, sizeof(buf));
-        (void)len;
-        buf[0x13] = 120;   /* 0x0078 low byte */
-        buf[0x14] = 0x00;  /* clear DQ flag + high bits -> valid, reading=120 */
+        size_t len = unhex(v->hex, buf, sizeof(buf));
         lingo_realtime_t r;
-        int rc = lingo_parse_realtime(buf, LINGO_REALTIME_LEN, &r);
-        int ok = (rc == 0 && r.glucose_valid && r.glucose_mgdl == 120);
-        printf("[synthetic-valid] rc=%d glucose_valid=%d mgdl=%u : %s\n",
-               rc, r.glucose_valid, r.glucose_mgdl, ok ? "OK" : "FAIL");
+        int rc = lingo_parse_realtime(buf, len, &r);
+        int ok = (rc == 0 && r.life_count == v->expect_life_count &&
+                  r.channel0_type == LINGO_ANALYTE_GLUCOSE &&
+                  r.glucose_valid && r.glucose_mgdl == 201);
+        printf("[%s] lifeCount=%u glucose_valid=%d mgdl=%u : %s\n",
+               v->name, r.life_count, r.glucose_valid, r.glucose_mgdl, ok ? "OK" : "FAIL");
         if (!ok) failures++;
     }
 
