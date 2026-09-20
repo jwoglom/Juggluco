@@ -75,6 +75,18 @@ typedef struct {
                                       warm-up.  Never emit a value when false. */
     uint16_t glucose_mgdl;         /* current capped glucose, mg/dL (scale 1) */
 
+    bool     historic_valid;       /* false when the historic reading carries the
+                                      data-quality flag; valid even when the
+                                      current reading is not (e.g. warm-up). */
+    uint16_t historic_mgdl;        /* historic capped glucose at historic_life_count */
+
+    /* Uncapped variants (not clamped to the 40-500 display range). Juggluco is
+     * built with UNCAPPED, so these are the values it stores. */
+    bool     uncapped_glucose_valid;
+    uint16_t uncapped_glucose_mgdl;
+    bool     uncapped_historic_valid;
+    uint16_t uncapped_historic_mgdl;
+
     bool     temperature_valid;    /* false when temperature == 0x8000        */
     int16_t  temperature_centi;    /* temperature in units of 1/100 degC      */
 } lingo_realtime_t;

@@ -589,6 +589,7 @@ public static native long getLibre3secs(byte[]  nfc1ar);
 public static native long getLibre3Sensorptr(String sensorid,long starttime);
 public static native long getLibre3SensorptrPD(String sensorid,long starttime,byte[] pin,String deviceaddress);
 public static native long saveLibre3MinuteL(long sensorptr,byte[] mindata,long nowmsec);
+public static native long saveLingoMinuteL(long sensorptr,byte[] mindata,long nowmsec);
 public static native boolean saveLibre3fastData(long sensorptr,byte[] mindata);
 public static native boolean saveLibre3History(long sensorptr,byte[] mindata);
 public static native int libre3EventLog(long sensorptr,byte[] logs);

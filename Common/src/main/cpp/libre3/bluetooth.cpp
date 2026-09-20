@@ -31,6 +31,7 @@
 #include "destruct.hpp"
 #include "datbackup.hpp"
 #include "hexstr.hpp"
+#include "lingo_realtime.h"
 extern Sensoren *sensors;
 
 extern void    sendKAuth(SensorGlucoseData *hist);
@@ -308,6 +309,53 @@ extern "C" JNIEXPORT  jlong JNICALL fromjava(saveLibre3MinuteL)(JNIEnv *env, jcl
     const uint32_t nowsec=msec/1000L;
     jlong res=save3current(sens,minptr,nowsec);
     save3history(sens,minptr);
+
+    backup->wakebackup(wakestream);
+    wakewithcurrent();
+
+    return res;
+    }
+
+// Abbott Lingo realtime reading. The frame is a 51-byte plaintext with two
+// analyte channels (see lingo_realtime.c), unlike the Libre 3 `oneminute`. Decode
+// it, map the glucose channel into a `oneminute`, and reuse the Libre 3 storage
+// (save3current/save3history). Invalid (warm-up / data-quality) values are left 0
+// so save3current treats them as no reading.
+extern "C" JNIEXPORT  jlong JNICALL fromjava(saveLingoMinuteL)(JNIEnv *env, jclass thiz, jlong sensorptr,jbyteArray jmindata,jlong msec) {
+    SensorGlucoseData *sens=reinterpret_cast<SensorGlucoseData *>(sensorptr);
+    if(!sens) {
+        LOGAR("saveLingoMinute sensorptr==null");
+        return 0LL;
+        }
+    if(!jmindata) {
+        LOGAR("saveLingoMinute jmindata==null");
+        return 0LL;
+        }
+    const jint len = env->GetArrayLength(jmindata);
+    if(len!=LINGO_REALTIME_LEN) {
+        LOGGER("saveLingoMinute length(jmindata)==%d!=%d\n",len,LINGO_REALTIME_LEN);
+        return 0LL;
+        }
+    uint8_t plain[LINGO_REALTIME_LEN];
+    env->GetByteArrayRegion(jmindata,0,len,(jbyte*)plain);
+    LOGGER("saveLingoMinute %s\n",hexstr(plain,len).str());
+    lingo_realtime_t r;
+    if(lingo_parse_realtime(plain,len,&r)!=0) {
+        LOGAR("saveLingoMinute parse failed");
+        return 0LL;
+        }
+    oneminute om{};
+    om.lifeCount=r.life_count;
+    om.readingMgDl=r.glucose_valid?r.glucose_mgdl:0;
+    om.rateOfChange=-32768;                 // unknown -> save3current uses trend
+    om.historicalLifeCount=r.historic_life_count;
+    om.historicalReading=r.historic_valid?r.historic_mgdl:0;
+    om.uncappedCurrentMgDl=r.uncapped_glucose_valid?r.uncapped_glucose_mgdl:0;
+    om.uncappedHistoricMgDl=r.uncapped_historic_valid?r.uncapped_historic_mgdl:0;
+    om.temperature=r.temperature_valid?(uint16_t)r.temperature_centi:0x8000;
+    const uint32_t nowsec=msec/1000L;
+    jlong res=save3current(sens,&om,nowsec);
+    save3history(sens,&om);
 
     backup->wakebackup(wakestream);
     wakewithcurrent();

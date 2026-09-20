@@ -119,6 +119,8 @@ void free() {
         {if(doLog) {Log.format(LOG_ID+" "+ SerialNumber + ": "+ "Libre3GattCallback(0x%x)\n",dataptr);};};
         sensorptr = Natives.getsensorptr(dataptr);
         securityVersion = (Libre3.pendingLingoSecurityVersion>=2) ? Libre3.pendingLingoSecurityVersion : 1;
+        // Lingo's realtime frame is 51 bytes plaintext (57 encrypted) vs Libre 3's 29 (35).
+        oneMinuteRawData = new byte[securityVersion>=2 ? 57 : 35];
 
         if(Thread.currentThread().equals( Looper.getMainLooper().getThread() )) {
             var thr=new Thread(()-> init());
@@ -1098,7 +1100,7 @@ private boolean    lastphase5=false;
 
     private int oneMinuteReadingSize = 0;
 //    private int oneMinutePacketNumber = 0;
-    private final byte[] oneMinuteRawData = new byte[35];
+    private final byte[] oneMinuteRawData;
 
     @SuppressLint("MissingPermission")
 private long datatime=0L;
@@ -1115,7 +1117,9 @@ private    void glucose_data(byte[] value,long timmsec) {
                 Log.e(LOG_ID, SerialNumber + ": "+"intDecrypt(cryptptr,3, oneMinuteRawData)==null");
                 return;
                }
-           long res=Natives.saveLibre3MinuteL(this.sensorptr, decr,timmsec);
+           long res=(securityVersion>=2)
+                   ? Natives.saveLingoMinuteL(this.sensorptr, decr,timmsec)
+                   : Natives.saveLibre3MinuteL(this.sensorptr, decr,timmsec);
            handleGlucoseResult(res,timmsec);
            datatime=timmsec;
            this.mBluetoothGatt.readRemoteRssi();

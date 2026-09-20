@@ -55,7 +55,10 @@
  * RESULT_CAPPED is consumed today; the rest are recorded for future use.
  *   RESULT_CAPPED=0 RATE_OF_CHANGE=2 EXTENDED_CODE=4 PROJECTED=6
  *   HISTORIC_CAPPED=8 ACTIONABLE_TREND=10 RESULT_UNCAPPED=11 HISTORIC_UNCAPPED=13 */
-#define ANALYTE_RESULT_CAPPED 0
+#define ANALYTE_RESULT_CAPPED     0
+#define ANALYTE_HISTORIC_CAPPED   8
+#define ANALYTE_RESULT_UNCAPPED   11
+#define ANALYTE_HISTORIC_UNCAPPED 13
 
 #define READING_MASK      0x0FFFu
 #define DATA_QUALITY_FLAG 0x8000u
@@ -82,6 +85,12 @@ int lingo_parse_realtime(const uint8_t *plain, size_t len, lingo_realtime_t *out
      * carries glucose. */
     out->glucose_valid = false;
     out->glucose_mgdl = 0;
+    out->historic_valid = false;
+    out->historic_mgdl = 0;
+    out->uncapped_glucose_valid = false;
+    out->uncapped_glucose_mgdl = 0;
+    out->uncapped_historic_valid = false;
+    out->uncapped_historic_mgdl = 0;
     for (int ch = 0; ch < 2; ch++) {
         const uint8_t type = (ch == 0) ? out->channel0_type : out->channel1_type;
         if (type != LINGO_ANALYTE_GLUCOSE) continue;
@@ -90,6 +99,23 @@ int lingo_parse_realtime(const uint8_t *plain, size_t len, lingo_realtime_t *out
         if ((capped & DATA_QUALITY_FLAG) == 0) {
             out->glucose_valid = true;
             out->glucose_mgdl = (uint16_t)(capped & READING_MASK);
+        }
+        /* Historic capped reading; valid during warm-up even when the current
+         * reading is not, so a fresh session can still show recent history. */
+        const uint16_t hist = rd_u16le(plain + start + ANALYTE_HISTORIC_CAPPED);
+        if ((hist & DATA_QUALITY_FLAG) == 0) {
+            out->historic_valid = true;
+            out->historic_mgdl = (uint16_t)(hist & READING_MASK);
+        }
+        const uint16_t unc = rd_u16le(plain + start + ANALYTE_RESULT_UNCAPPED);
+        if ((unc & DATA_QUALITY_FLAG) == 0) {
+            out->uncapped_glucose_valid = true;
+            out->uncapped_glucose_mgdl = (uint16_t)(unc & READING_MASK);
+        }
+        const uint16_t unch = rd_u16le(plain + start + ANALYTE_HISTORIC_UNCAPPED);
+        if ((unch & DATA_QUALITY_FLAG) == 0) {
+            out->uncapped_historic_valid = true;
+            out->uncapped_historic_mgdl = (uint16_t)(unch & READING_MASK);
         }
         break;
     }
