@@ -9,4 +9,5 @@
 # repository.
 /Common/src/main/jniLibs/
 /Common/src/mobileSi/jniLibs/
+/Common/src/libre3/jniLibs/
 /Common/src/wearSi/jniLibs/
