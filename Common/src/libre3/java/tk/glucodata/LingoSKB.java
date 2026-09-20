@@ -201,6 +201,17 @@ class LingoSKB {
 
     private static void info(String s) { if (Log.doLog) Log.i(LOG_ID, s); }
     private static void err(String what, Throwable e) {
-        Log.e(LOG_ID, what + " failed: " + e);
+        // Reflective calls wrap the real error in InvocationTargetException; unwrap
+        // the whole cause chain and log each level's stack so the underlying SKB
+        // failure (not just the wrapper) is visible in the trace.
+        Throwable t = e;
+        StringBuilder sb = new StringBuilder(what + " failed: " + e);
+        while (t instanceof java.lang.reflect.InvocationTargetException
+                && t.getCause() != null) {
+            t = t.getCause();
+            sb.append(" -> cause: ").append(t);
+        }
+        Log.e(LOG_ID, sb.toString());
+        Log.stack(LOG_ID, what + " stack", t);
     }
 }
