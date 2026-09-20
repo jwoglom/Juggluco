@@ -120,7 +120,8 @@ jobs:
       - name: Fetch Lingo SecureKeyBox libraries (private, experimental)
         if: env.FETCH_LINGO_SKB == 'true'
         env:
-          LINGO_SKB_TOKEN: ${{ secrets.LINGO_SKB_TOKEN }}
+          # Repo secret is LINGO_REPO_READONLY_TOKEN; the script reads LINGO_SKB_TOKEN.
+          LINGO_SKB_TOKEN: ${{ secrets.LINGO_REPO_READONLY_TOKEN }}
         run: |
           # Pulls Abbott's white-box .so from the private jwoglom/lingo-apk repo
           # into Common/src/libre3/jniLibs/arm64-v8a (gitignored, never committed).

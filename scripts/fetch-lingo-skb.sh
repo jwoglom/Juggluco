@@ -7,8 +7,9 @@
 # builds (and forks) are unaffected.
 #
 # Environment:
-#   LINGO_SKB_TOKEN   GitHub token with read access to jwoglom/lingo-apk
-#                     (in CI, provide it as a repository secret of the same name).
+#   LINGO_SKB_TOKEN   GitHub token with read access to jwoglom/lingo-apk.
+#                     In CI this is mapped from the repository secret
+#                     LINGO_REPO_READONLY_TOKEN (see .github/workflows/build.yml).
 #   LINGO_SKB_REPO    override source repo (default jwoglom/lingo-apk)
 #   LINGO_SKB_REF     override git ref (default the repo's default branch)
 #
