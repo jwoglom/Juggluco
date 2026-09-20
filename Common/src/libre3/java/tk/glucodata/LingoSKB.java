@@ -117,6 +117,11 @@ class LingoSKB {
      */
     LingoSKB(String dexPath, String optimizedDir, String nativeLibDir) throws Exception {
         final ClassLoader parent = LingoSKB.class.getClassLoader();
+
+        // Load our no-op MSLog in the parent loader so it shadows the Lingo dex's
+        // (null EventBus) when the SKB natives up-call it; also keeps R8 off it.
+        com.adc.dcs.core.MSLog.i(LOG_ID, "init");
+
         final DexClassLoader loader =
                 new DexClassLoader(dexPath, optimizedDir, nativeLibDir, parent);
 
