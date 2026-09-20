@@ -41,11 +41,7 @@ public static	long   	second(byte[] nfc1,Tag tag) {
 	long nowsec=(long)Math.round(System.currentTimeMillis()/1000.0);
 //	long nowsec=Natives.getLibre3secs(nfc1);
 //	if(nowsec==0L) return 0L;
-	// Abbott Lingo activates with a fixed receiver id (1001), not a LibreView
-	// account id; using the account id here makes the sensor reject the switch
-	// as "not yours" (NFC error 0xb1).
-	long accountId = (tk.glucodata.Libre3.pendingLingoSecurityVersion>=2)
-	                 ? 1001L : getlibreAccountIDnumber();
+	long accountId=getlibreAccountIDnumber();
 	{if(doLog) {Log.i(LOG_ID,"accountId="+accountId);};};
 	byte[] metcrc=new byte[10];// 8C 42 86 62 8D 6D 41 1F BC 93
 	if(Natives.startTimeIDsum(metcrc, nowsec, accountId) != 0) {

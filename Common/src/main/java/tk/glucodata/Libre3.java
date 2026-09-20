@@ -38,9 +38,7 @@ private static final String LOG_ID="Libre3";
 // SecureKeyBox (LingoSKB); a Lingo scan records its securityVersion below so the
 // GATT handshake takes that path. Experimental, arm64 only.
 private static final int PRODUCT_TYPE_LINGO=9;
-// Set when a Lingo sensor is scanned; read by the libre3 Libre3GattCallback to
-// drive the SecureKeyBox handshake. Declared here (main source set) so it is
-// visible to all flavors without referencing a libre3-only class.
+// Set on a Lingo scan; read by libre3 Libre3GattCallback to take the SecureKeyBox path.
 public static volatile int pendingLingoSecurityVersion=0;
 public static byte[] firstnfc(Tag tag) {
 	final byte[] firstcom={(byte)0x02,(byte)0xA1,(byte)0x7A};
