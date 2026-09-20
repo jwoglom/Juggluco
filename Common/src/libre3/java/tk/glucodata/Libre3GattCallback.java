@@ -81,6 +81,12 @@ public class Libre3GattCallback extends SuperGattCallback {
     private boolean isServicesDiscovered = false;
     private final long sensorptr;
     private long securityContext=0L;
+    // Lingo (Abbott SecureKeyBox) path. securityVersion is 1 for FreeStyle Libre 3
+    // and 3 for Abbott Lingo; when >=2 the handshake runs through Abbott's white-box
+    // (lingoskb) instead of Juggluco's clean-room native crypto. The version is set by
+    // Libre3.libre3NFC (Libre3.pendingLingoSecurityVersion) when a Lingo sensor is scanned.
+    private int securityVersion=1;
+    private LingoSKB lingoskb=null;
 private final Queue<byte[]> sendqueue = new ConcurrentLinkedQueue<byte[]>();
 private int    lastEventReceived=0;
     private BluetoothGattCharacteristic gattCharPatchDataControl = null;
@@ -386,7 +392,7 @@ private void mknonceback() {
 
 
 
-var encrypted = Natives.libre3EncryptChallengeReply(securityContext,nonce1,uit);
+var encrypted = lingoskb!=null ? lingoskb.encrypt(nonce1,uit) : Natives.libre3EncryptChallengeReply(securityContext,nonce1,uit);
 
 
 
@@ -406,7 +412,7 @@ private void challenge67() {
     byte[] nonce=new byte[7];
     arraycopy(rdtData,0,first,0,60);
     arraycopy(rdtData,60,nonce,0,7);
-    byte[] decr=Natives.libre3DecryptChallengeResponse(securityContext,nonce,first);
+    byte[] decr=lingoskb!=null ? lingoskb.decrypt(nonce,first) : Natives.libre3DecryptChallengeResponse(securityContext,nonce,first);
     Log.showbytes("challenge67 decr",decr);
     var backr2=copyOfRange(decr,0,16);
     if(!java.util.Arrays.equals(r2,backr2)) {
@@ -423,7 +429,7 @@ private void challenge67() {
     var kEnc=copyOfRange(decr,32,48);
     var ivEnc=copyOfRange(decr,48,56);
 //    byte[] AuthKey=KEYSCrypto.exportAuthorizationKey();
-    byte[] savedAuthorization=Natives.libre3ExportSavedAuthorization(securityContext);
+    byte[] savedAuthorization=lingoskb!=null ? lingoskb.exportAuthorizationKey() : Natives.libre3ExportSavedAuthorization(securityContext);
     Log.showbytes("challenge67 savedAuthorization",savedAuthorization);
     //securityContext=new BCrypt(kEnc,ivEnc);
     cryptptr=initcrypt(cryptptr,kEnc,ivEnc);
@@ -480,7 +486,7 @@ private boolean sendSecurityCommand(byte b) {
 private int commandphase=1;
 private void setCertificate140() {
     {if(doLog) {Log.i(LOG_ID, SerialNumber + ": "+"setCertificate140");};};
-    cryptolib.setPatchCertificate(securityContext,rdtData);
+    if(lingoskb!=null) lingoskb.setPatchCertificate(rdtData); else cryptolib.setPatchCertificate(securityContext,rdtData);
     if(sendSecurityCommand( (byte)0x0D)) {
         commandphase=4;
         }
@@ -488,7 +494,7 @@ private void setCertificate140() {
 private boolean    generateKAuth(byte[] input) {
     {if(doLog){showbytes(LOG_ID+ " "+SerialNumber +" generateKAuth",input);};}
     //Saves something?
-    return Natives.libre3DeriveAuthorizationRoot(securityContext,input)==1;
+    return lingoskb!=null ? lingoskb.generateKAuth(input) : (Natives.libre3DeriveAuthorizationRoot(securityContext,input)==1);
     }
 private boolean setCertificate65() {
     {if(doLog) {Log.i(LOG_ID, SerialNumber + ": "+"setCertificate65");};};
@@ -529,6 +535,9 @@ final private boolean notsuspended=true;
 
 private    void save_history(byte[] value) {
     byte[] olddec=intDecrypt(cryptptr,4, value);
+    if(securityVersion>=2)
+        Natives.saveLingoHistory(this.sensorptr, olddec);
+    else
         Natives.saveLibre3History(this.sensorptr, olddec);
     }
 @Override 
@@ -610,7 +619,10 @@ private    void fast_data(byte[] encryp) {
             info("fast_data decrypt went wrong"); 
             dodisconnect(mBluetoothGatt); 
         } else {
-            Natives.saveLibre3fastData(sensorptr, decr);
+            if(securityVersion>=2)
+                Natives.saveLingoFastData(sensorptr, decr);
+            else
+                Natives.saveLibre3fastData(sensorptr, decr);
         }
     }
 
@@ -621,6 +633,15 @@ private void onConnectGatt() {
     isPreAuthorized=false;
     }
 private boolean initSecurityKeys(byte[] savedAuthorization,int level) {
+    if(securityVersion>=2) { // Lingo: drive Abbott's SecureKeyBox white-box
+        if(lingoskb==null)
+            lingoskb=LingoSKB.create(Applic.getContext());
+        if(lingoskb==null) {
+            setfailure("Lingo SecureKeyBox unavailable");
+            return false;
+            }
+        return lingoskb.initECDH(savedAuthorization,securityVersion);
+        }
     long context=Natives.libre3BeginSecurityHandshake(securityContext);
     if(context==0L) {
         securityContext=0L;
@@ -637,7 +658,7 @@ private void handleMSLibre3SecurityNotificationsEnabledEvent() {
         }
     else {
         var exportedKAuth = Natives.getLibre3kAuth(sensorptr);
-        if(initSecurityKeys(exportedKAuth,1)) {
+        if(initSecurityKeys(exportedKAuth,securityVersion)) {
             if(exportedKAuth==null) {
                 {if(doLog) {Log.i(LOG_ID, SerialNumber + ": "+"exportedKAuth==null");};};
                 sendSecurityCommand(1);
@@ -659,11 +680,32 @@ private void logevent(byte[] value) {
             return;
     lastEventReceived=last;
     }
+// Resolve the Lingo securityVersion for THIS connection (not just at construction):
+// a persisted per-serial value first, else the transient scan flag, else Libre 3.
+// Runs on every connect (init is called from the ctor and on each reconnect), so a
+// scan or a restart is picked up, and the realtime buffer is sized to match.
+private void resolveSecurity() {
+    int v=Libre3.getPersistedLingoSecver(SerialNumber);
+    if(v<2 && Libre3.pendingLingoSecurityVersion>=2)
+        v=Libre3.pendingLingoSecurityVersion;
+    if(v<2)
+        v=1;
+    if(v>=2) {
+        Libre3.setPersistedLingoSecver(SerialNumber,v);
+        Natives.setLibre3Lingo(sensorptr);      // 40-200 mg/dL range; mark above-range as high
+        }
+    if(v!=securityVersion || oneMinuteRawData==null) {
+        securityVersion=v;
+        oneMinuteRawData=new byte[v>=2 ? 57 : 35];
+        oneMinuteReadingSize=0;
+        }
+    }
 private void init() {
+    resolveSecurity();
     var exportedKAuth = Natives.getLibre3kAuth(sensorptr);
     if(!isPreAuthorized) {
         if(exportedKAuth!=null) {
-            if(initSecurityKeys(exportedKAuth,1)) {
+            if(initSecurityKeys(exportedKAuth,securityVersion)) {
                 isPreAuthorized=true;
                 commandphase = 5;
                 }
@@ -939,7 +981,16 @@ private int getcomphase() {
     return commandphase;
     }
 private  byte[]           generateEphemeralKeys() {
-
+    if(lingoskb!=null) {
+        // The SecureKeyBox already returns the 65-byte uncompressed point (0x04 prefix).
+        var uit=lingoskb.generateEphemeralKeys();
+        if(uit==null || uit.length!=65) {
+            Log.e(LOG_ID, SerialNumber + ": lingo generateEphemeralKeys failed");
+            return null;
+            }
+        {if(doLog){showbytes(LOG_ID+ " "+SerialNumber + " generateEphemeralKeys()",uit);};}
+        return uit;
+        }
     var evikeys=Natives.libre3CreateEphemeralPublicKey(securityContext);
     if(evikeys==null || evikeys.length!=64) {
         Log.e(LOG_ID, SerialNumber + ": libre3CreateEphemeralPublicKey failed");
@@ -994,7 +1045,7 @@ private boolean    lastphase5=false;
                     ;
                     break;
                 case 2: {
-                    if(sendSecurityCert(cryptolib.getAppCertificate())) { //TODO what with failure?
+                    if(sendSecurityCert(lingoskb!=null ? lingoskb.getAppCertificate() : cryptolib.getAppCertificate())) { //TODO what with failure?
                         commandphase = 3;
                         }
                     else {
@@ -1073,7 +1124,7 @@ private boolean    lastphase5=false;
 
     private int oneMinuteReadingSize = 0;
 //    private int oneMinutePacketNumber = 0;
-    private final byte[] oneMinuteRawData = new byte[35];
+    private byte[] oneMinuteRawData;
 
     @SuppressLint("MissingPermission")
 private long datatime=0L;
@@ -1090,7 +1141,9 @@ private    void glucose_data(byte[] value,long timmsec) {
                 Log.e(LOG_ID, SerialNumber + ": "+"intDecrypt(cryptptr,3, oneMinuteRawData)==null");
                 return;
                }
-           long res=Natives.saveLibre3MinuteL(this.sensorptr, decr,timmsec);
+           long res=(securityVersion>=2)
+                   ? Natives.saveLingoMinuteL(this.sensorptr, decr,timmsec)
+                   : Natives.saveLibre3MinuteL(this.sensorptr, decr,timmsec);
            handleGlucoseResult(res,timmsec);
            datatime=timmsec;
            this.mBluetoothGatt.readRemoteRssi();
@@ -1178,7 +1231,9 @@ private void fillHistory(int backFillStartHistoricLifeCount) {
            else {
             {if(doLog) {Log.i(LOG_ID, SerialNumber + ": "+"get History: lastHistoricLifeCountReceived ("+lastHistoricLifeCountReceived+")<backFillStartHistoricLifeCount ("+backFillStartHistoricLifeCount +")");};};
             int takelast=Math.max(lastHistoricLifeCountReceived,5);
-            byte[] command=Natives.libre3ControlHistory(1, takelast);
+            byte[] command=(securityVersion>=2)
+                    ? Natives.lingoControlHistory(1, takelast)
+                    : Natives.libre3ControlHistory(1, takelast);
             if(qsendcommand(command))
                 backFillInProgress=true;
             }
@@ -1188,7 +1243,9 @@ private void    fillClinical(int backFillStartLifeCount) {
       {if(doLog) {Log.i(LOG_ID, SerialNumber + ": "+"getlastLifeCountReceived(sensorptr)="+lastLifeCountReceived+" backFillStartLifeCount="+ backFillStartLifeCount);};};
 
       if(lastLifeCountReceived<backFillStartLifeCount) {
-        var command=Natives.libre3ClinicalControl(1,lastLifeCountReceived);
+        var command=(securityVersion>=2)
+                ? Natives.lingoClinicalControl(1,lastLifeCountReceived)
+                : Natives.libre3ClinicalControl(1,lastLifeCountReceived);
         if(qsendcommand(command))
             backFillInProgress=true;
         }
