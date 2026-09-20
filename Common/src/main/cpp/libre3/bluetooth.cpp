@@ -316,6 +316,14 @@ extern "C" JNIEXPORT  jlong JNICALL fromjava(saveLibre3MinuteL)(JNIEnv *env, jcl
     return res;
     }
 
+// Mark this sensor as an Abbott Lingo so its 40-200 mg/dL reporting range is
+// used (getmaxmgdL) and above-range readings are shown as high, not as a literal
+// value. Persisted in the sensor Info; set when the Lingo path is resolved.
+extern "C" JNIEXPORT  void JNICALL fromjava(setLibre3Lingo)(JNIEnv *env, jclass thiz, jlong sensorptr) {
+    if(SensorGlucoseData *sens=reinterpret_cast<SensorGlucoseData *>(sensorptr))
+        sens->getinfo()->lingo=true;
+    }
+
 // Abbott Lingo realtime reading. The frame is a 51-byte plaintext with two
 // analyte channels (see lingo_realtime.c), unlike the Libre 3 `oneminute`. Decode
 // it, map the glucose channel into a `oneminute`, and reuse the Libre 3 storage

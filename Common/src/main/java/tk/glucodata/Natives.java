@@ -590,6 +590,7 @@ public static native long getLibre3Sensorptr(String sensorid,long starttime);
 public static native long getLibre3SensorptrPD(String sensorid,long starttime,byte[] pin,String deviceaddress);
 public static native long saveLibre3MinuteL(long sensorptr,byte[] mindata,long nowmsec);
 public static native long saveLingoMinuteL(long sensorptr,byte[] mindata,long nowmsec);
+public static native void setLibre3Lingo(long sensorptr);
 public static native boolean saveLibre3fastData(long sensorptr,byte[] mindata);
 public static native boolean saveLingoHistory(long sensorptr,byte[] history);
 public static native boolean saveLingoFastData(long sensorptr,byte[] fastdata);

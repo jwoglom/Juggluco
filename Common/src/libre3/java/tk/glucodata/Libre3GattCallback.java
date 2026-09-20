@@ -690,8 +690,10 @@ private void resolveSecurity() {
         v=Libre3.pendingLingoSecurityVersion;
     if(v<2)
         v=1;
-    if(v>=2)
+    if(v>=2) {
         Libre3.setPersistedLingoSecver(SerialNumber,v);
+        Natives.setLibre3Lingo(sensorptr);      // 40-200 mg/dL range; mark above-range as high
+        }
     if(v!=securityVersion || oneMinuteRawData==null) {
         securityVersion=v;
         oneMinuteRawData=new byte[v>=2 ? 57 : 35];
