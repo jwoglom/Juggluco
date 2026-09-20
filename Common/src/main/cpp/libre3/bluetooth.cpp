@@ -515,6 +515,91 @@ extern "C" JNIEXPORT  jboolean JNICALL fromjava(saveLibre3History)(JNIEnv *env, 
     return  saveLibre3History(sens, history,len);
     }
 
+// Abbott Lingo backfill records (GlucoseKetoneSPL). A reading u16 carries the
+// data-quality flag in bit15 (invalid) and the 12-bit value in the low bits;
+// lifecounts carry the analyte-channel in bit15. These differ from Libre 3,
+// which stores raw values, so Lingo needs its own history/clinical decoders.
+static inline uint16_t lingo_rd_u16(const uint8_t *p){ return (uint16_t)(p[0]|((uint16_t)p[1]<<8)); }
+static inline bool lingo_reading(uint16_t v,uint16_t *out){
+    if(v & 0x8000u) return false;          // PATCH_FLAG_DQ: invalid
+    *out=(uint16_t)(v & 0x0FFFu);           // PATCH_MASK_READING
+    return true;
+    }
+
+// Historic backfill: @0 u16 startLifeCount (bit15=channel), then up to 6 u16
+// samples 5 min apart, stopping at the first zero.
+static bool saveLingoHistory(SensorGlucoseData *sens,const uint8_t *p,int len) {
+    if(len<4) return false;
+    int lifecount=lingo_rd_u16(p) & 0x7FFF;         // strip channel bit
+    const int mininterval=sens->getmininterval();
+    int idpos=int(round(lifecount/(double)mininterval));
+    sens->backhistory(idpos);
+    int lastsave=0;
+    const int nsamples=(len-2)/2;
+    for(int i=0;i<nsamples;i++,idpos++,lifecount+=mininterval) {
+        const uint16_t raw=lingo_rd_u16(p+2+i*2);
+        if(raw==0) break;                            // no more samples
+        uint16_t val;
+        if(lingo_reading(raw,&val) && validglucosevalue(val)) {
+            sens->savenewhistory(idpos,lifecount,(uint16_t)(10*val));
+            lastsave=idpos;
+            }
+        }
+    sens->updateHistorylifecount(lastsave);
+    if(++lastsave>sens->getScanendhistory())
+        sens->setendhistory(lastsave);
+    return true;
+    }
+
+extern "C" JNIEXPORT  jboolean JNICALL fromjava(saveLingoHistory)(JNIEnv *env, jclass thiz, jlong sensorptr,jbyteArray jhistory) {
+    SensorGlucoseData *sens=reinterpret_cast<SensorGlucoseData *>(sensorptr);
+    if(!sens){ LOGAR("saveLingoHistory sensorptr=null"); return false; }
+    if(!jhistory){ LOGAR("saveLingoHistory jhistory=null"); return false; }
+    const jint len=env->GetArrayLength(jhistory);
+    if(len<4){ LOGGER("saveLingoHistory len<4 %d\n",len); return false; }
+    const jbyte *history=(jbyte*)env->GetPrimitiveArrayCritical(jhistory,nullptr);
+    if(!history){ LOGAR("saveLingoHistory critical=null"); return false; }
+    destruct _dest([env,jhistory,history](){env->ReleasePrimitiveArrayCritical(jhistory,const_cast<jbyte*>(history),JNI_ABORT);});
+    LOGGER("saveLingoHistory %s\n",hexstr((const uint8_t*)history,len).str());
+    return saveLingoHistory(sens,(const uint8_t*)history,len);
+    }
+
+// Clinical/fast backfill: @0 u16 lifeCount (bit15=channel), @2 rawData[8],
+// @10 u16 current reading, @12 u16 historic; historic lifecount =
+// lifeCount<22 ? 0 : ((lifeCount-17)/5)*5.
+extern "C" JNIEXPORT  jboolean JNICALL fromjava(saveLingoFastData)(JNIEnv *env, jclass thiz, jlong sensorptr,jbyteArray jfast) {
+    SensorGlucoseData *sens=reinterpret_cast<SensorGlucoseData *>(sensorptr);
+    if(!sens){ LOGAR("saveLingoFastData sensorptr=null"); return false; }
+    if(!jfast){ LOGAR("saveLingoFastData jfast=null"); return false; }
+    const jint len=env->GetArrayLength(jfast);
+    if(len<14){ LOGGER("saveLingoFastData len<14 %d\n",len); return false; }
+    const jbyte *fast=(jbyte*)env->GetPrimitiveArrayCritical(jfast,nullptr);
+    if(!fast){ LOGAR("saveLingoFastData critical=null"); return false; }
+    destruct _dest([env,jfast,fast](){env->ReleasePrimitiveArrayCritical(jfast,const_cast<jbyte*>(fast),JNI_ABORT);});
+    LOGGER("saveLingoFastData %s\n",hexstr((const uint8_t*)fast,len).str());
+    const uint8_t *p=(const uint8_t*)fast;
+    const int lifecount=lingo_rd_u16(p) & 0x7FFF;
+    uint16_t curval=0,histval=0;
+    const bool curok=lingo_reading(lingo_rd_u16(p+10),&curval);
+    const bool histok=lingo_reading(lingo_rd_u16(p+12),&histval);
+    const int histcount=lifecount<22?0:((lifecount-17)/5)*5;
+    if(histok && validglucosevalue(histval) && histcount>=0) {
+        if(saveLibre3Historyel(sens,histcount,histval))
+            sens->consecutivehistorylifecount();
+        }
+    if(lifecount>=0 && curok && validglucosevalue(curval)) {
+        const auto wastime=sens->lifeCount2time(lifecount);
+        if(wastime>=1666476000 && !sens->hasStreamID(lifecount,wastime)) {
+            sens->savepollallIDs<60>(wastime,lifecount,curval,0,NAN);
+            sens->backstream(lifecount);
+            if(lifecount>=(sens->pollcount()-2))
+                backup->wakebackup(wakestream);
+            }
+        }
+    sens->fastupdatelifecount(lifecount);
+    return true;
+    }
+
 struct Patchstatus  {
     int16_t lifeCount;    
     int16_t errorData;//?
@@ -540,7 +625,9 @@ extern "C" JNIEXPORT  jint JNICALL  fromjava(libre3processpatchstatus)(JNIEnv *e
         return -1;
         }    
     const jint len = env->GetArrayLength(jstatus);
-    if(len!=sizeof(Patchstatus)) {
+    // Lingo appends two analyte-type bytes (14 B); bytes 0-11 are identical to
+    // the Libre 3 Patchstatus, so the struct read below still applies.
+    if(len!=sizeof(Patchstatus) && len!=sizeof(Patchstatus)+2) {
         LOGGER("libre3processpatchstatus length(jstatus)==%d!=%d\n",len,(int)sizeof(Patchstatus));
         return -1;
         }
@@ -611,6 +698,14 @@ struct ControlHistory:RequestData {
 struct ClinicalControl:RequestData {
     ClinicalControl(int8_t arg,int32_t from): RequestData({{1,1},arg,from}) {}
         };
+// Lingo carries glucose on analyte channel 1, so its backfill uses recordType 2
+// (historic) / 3 (clinical) instead of Libre 3's 0 / 1 (channel 0).
+struct LingoControlHistory:RequestData {
+    LingoControlHistory(int8_t arg,int32_t from): RequestData({{1,2},arg,from}) {}
+        };
+struct LingoClinicalControl:RequestData {
+    LingoClinicalControl(int8_t arg,int32_t from): RequestData({{1,3},arg,from}) {}
+        };
 
 static jbyteArray comtojbyteArray(JNIEnv *env, const struct RequestData &con) {
     int conlen=sizeof(con);
@@ -625,7 +720,17 @@ extern "C" JNIEXPORT  jbyteArray JNICALL  fromjava(libre3ControlHistory)(JNIEnv 
     }
 extern "C" JNIEXPORT  jbyteArray JNICALL  fromjava(libre3ClinicalControl)(JNIEnv *env, jclass thiz, jint arg,jint from) {
     LOGGER("libre3ClinicalControl(%d,%d)\n",arg,from);
-    const ClinicalControl com(arg,from);    
+    const ClinicalControl com(arg,from);
+    return comtojbyteArray(env,com);
+    }
+extern "C" JNIEXPORT  jbyteArray JNICALL  fromjava(lingoControlHistory)(JNIEnv *env, jclass thiz, jint arg,jint from) {
+    LOGGER("lingoControlHistory(%d,%d)\n",arg,from);
+    const LingoControlHistory com(arg,from);
+    return comtojbyteArray(env,com);
+    }
+extern "C" JNIEXPORT  jbyteArray JNICALL  fromjava(lingoClinicalControl)(JNIEnv *env, jclass thiz, jint arg,jint from) {
+    LOGGER("lingoClinicalControl(%d,%d)\n",arg,from);
+    const LingoClinicalControl com(arg,from);
     return comtojbyteArray(env,com);
     }
 

@@ -591,6 +591,10 @@ public static native long getLibre3SensorptrPD(String sensorid,long starttime,by
 public static native long saveLibre3MinuteL(long sensorptr,byte[] mindata,long nowmsec);
 public static native long saveLingoMinuteL(long sensorptr,byte[] mindata,long nowmsec);
 public static native boolean saveLibre3fastData(long sensorptr,byte[] mindata);
+public static native boolean saveLingoHistory(long sensorptr,byte[] history);
+public static native boolean saveLingoFastData(long sensorptr,byte[] fastdata);
+public static native byte[] lingoControlHistory(int arg,int from);
+public static native byte[] lingoClinicalControl(int arg,int from);
 public static native boolean saveLibre3History(long sensorptr,byte[] mindata);
 public static native int libre3EventLog(long sensorptr,byte[] logs);
 public static native void setLibre3kAuth(long sensorptr,byte[] kauthin);

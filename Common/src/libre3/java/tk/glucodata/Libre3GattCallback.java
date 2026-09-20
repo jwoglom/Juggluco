@@ -538,6 +538,9 @@ final private boolean notsuspended=true;
 
 private    void save_history(byte[] value) {
     byte[] olddec=intDecrypt(cryptptr,4, value);
+    if(securityVersion>=2)
+        Natives.saveLingoHistory(this.sensorptr, olddec);
+    else
         Natives.saveLibre3History(this.sensorptr, olddec);
     }
 @Override 
@@ -619,7 +622,10 @@ private    void fast_data(byte[] encryp) {
             info("fast_data decrypt went wrong"); 
             dodisconnect(mBluetoothGatt); 
         } else {
-            Natives.saveLibre3fastData(sensorptr, decr);
+            if(securityVersion>=2)
+                Natives.saveLingoFastData(sensorptr, decr);
+            else
+                Natives.saveLibre3fastData(sensorptr, decr);
         }
     }
 
@@ -1207,7 +1213,9 @@ private void fillHistory(int backFillStartHistoricLifeCount) {
            else {
             {if(doLog) {Log.i(LOG_ID, SerialNumber + ": "+"get History: lastHistoricLifeCountReceived ("+lastHistoricLifeCountReceived+")<backFillStartHistoricLifeCount ("+backFillStartHistoricLifeCount +")");};};
             int takelast=Math.max(lastHistoricLifeCountReceived,5);
-            byte[] command=Natives.libre3ControlHistory(1, takelast);
+            byte[] command=(securityVersion>=2)
+                    ? Natives.lingoControlHistory(1, takelast)
+                    : Natives.libre3ControlHistory(1, takelast);
             if(qsendcommand(command))
                 backFillInProgress=true;
             }
@@ -1217,7 +1225,9 @@ private void    fillClinical(int backFillStartLifeCount) {
       {if(doLog) {Log.i(LOG_ID, SerialNumber + ": "+"getlastLifeCountReceived(sensorptr)="+lastLifeCountReceived+" backFillStartLifeCount="+ backFillStartLifeCount);};};
 
       if(lastLifeCountReceived<backFillStartLifeCount) {
-        var command=Natives.libre3ClinicalControl(1,lastLifeCountReceived);
+        var command=(securityVersion>=2)
+                ? Natives.lingoClinicalControl(1,lastLifeCountReceived)
+                : Natives.libre3ClinicalControl(1,lastLifeCountReceived);
         if(qsendcommand(command))
             backFillInProgress=true;
         }
