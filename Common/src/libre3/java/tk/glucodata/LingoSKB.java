@@ -18,6 +18,12 @@
 
 package tk.glucodata;
 
+import android.content.Context;
+
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 
@@ -54,6 +60,43 @@ import dalvik.system.DexClassLoader;
 class LingoSKB {
     private static final String LOG_ID = "LingoSKB";
     private static final String PKG = "com.adc.dcm.gksensor.security.";
+
+    /** Name of the bundled dex jar (libre3 asset, fetched at build time). */
+    private static final String DEX_ASSET = "lingogks.jar";
+
+    /**
+     * Build a LingoSKB using the bundled GKS classes dex and the SecureKeyBox
+     * libraries shipped in this app. Returns null (logging why) if the SKB is
+     * not present in this build or fails to initialise, so callers can fall back.
+     */
+    static LingoSKB create(Context context) {
+        try {
+            final File jar = new File(context.getCodeCacheDir(), DEX_ASSET);
+            copyAssetIfNeeded(context, DEX_ASSET, jar);
+            final String optimizedDir = context.getCodeCacheDir().getAbsolutePath();
+            final String nativeLibDir = context.getApplicationInfo().nativeLibraryDir;
+            return new LingoSKB(jar.getAbsolutePath(), optimizedDir, nativeLibDir);
+        } catch (Throwable e) {
+            Log.e(LOG_ID, "create failed (Lingo SecureKeyBox unavailable): " + e);
+            return null;
+        }
+    }
+
+    private static void copyAssetIfNeeded(Context context, String asset, File out)
+            throws Exception {
+        // The asset is immutable per build; copy once. A size check catches an
+        // upgrade that replaced the bundled dex.
+        long assetLen = -1;
+        try { assetLen = context.getAssets().openFd(asset).getLength(); }
+        catch (Exception ignore) { /* not all builds mark length; fall through */ }
+        if (out.exists() && assetLen >= 0 && out.length() == assetLen) return;
+        try (InputStream in = context.getAssets().open(asset);
+             OutputStream os = new FileOutputStream(out)) {
+            final byte[] buf = new byte[1 << 16];
+            int n;
+            while ((n = in.read(buf)) > 0) os.write(buf, 0, n);
+        }
+    }
 
     private final Object crypto;                 // GKSSKBCryptoLib instance
     private final Method mGetAppCertificate;

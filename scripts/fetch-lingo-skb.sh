@@ -45,25 +45,57 @@ api="https://api.github.com/repos/$repo/contents"
 refq=""
 [ -n "$ref" ] && refq="?ref=$ref"
 
-for pair in "${libs[@]}"; do
-	src=${pair%%=*}
-	out=${pair##*=}
-	echo "fetch-lingo-skb: $repo/$src -> jniLibs/arm64-v8a/$out"
-	# The contents API with the raw media type streams the file content directly
-	# (works for the large white-box libraries; the JSON API would base64 them).
-	code=$(curl -sS -w '%{http_code}' -o "$dest/$out" \
+# Download one file from the source repo via the contents API (raw media type
+# streams content directly; the JSON API would base64 large files).
+fetch_raw() {
+	local src=$1 out=$2 code
+	code=$(curl -sS -w '%{http_code}' -o "$out" \
 		-H "Authorization: Bearer $token" \
 		-H "Accept: application/vnd.github.raw+json" \
 		-H "X-GitHub-Api-Version: 2022-11-28" \
 		"$api/$src$refq")
 	if [ "$code" != "200" ]; then
 		echo "fetch-lingo-skb: FAILED to fetch $src (HTTP $code)" >&2
-		# Show a short diagnostic (the body on error is small JSON).
-		head -c 300 "$dest/$out" >&2 || true; echo >&2
-		rm -f "$dest/$out"
-		exit 1
+		head -c 300 "$out" >&2 || true; echo >&2
+		rm -f "$out"
+		return 1
 	fi
+}
+
+for pair in "${libs[@]}"; do
+	src=${pair%%=*}
+	out=${pair##*=}
+	echo "fetch-lingo-skb: $repo/$src -> jniLibs/arm64-v8a/$out"
+	fetch_raw "$src" "$dest/$out"
 done
 
 echo "fetch-lingo-skb: fetched $(ls "$dest"/*.so | wc -l | tr -d ' ') libraries into $dest"
 ls -l "$dest"
+
+# --- GKS classes dex bundle -------------------------------------------------
+# The SecureKeyBox natives bind to the Lingo GKS Java classes, which Juggluco
+# loads at runtime through a DexClassLoader (see LingoSKB). Extract the Lingo
+# APK's dex files into a jar bundled as a libre3 asset (gitignored). We ship the
+# whole classes*.dex set: a DexClassLoader whose parent is Juggluco's loader
+# resolves shared classes (android.*, the no-op MSLog) from the parent first, so
+# only the GKS classes and their private dependencies come from this jar.
+apkpath=${LINGO_SKB_APK:-com.abbott.lingo.wellness.apk}
+assets="$root/Common/src/libre3/assets"
+mkdir -p "$assets"
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+echo "fetch-lingo-skb: $repo/$apkpath -> extracting classes*.dex"
+if ! fetch_raw "$apkpath" "$work/lingo.apk"; then
+	echo "fetch-lingo-skb: could not fetch $apkpath; skipping dex bundle" >&2
+	exit 1
+fi
+( cd "$work" && unzip -o -q lingo.apk 'classes*.dex' )
+ndex=$(ls "$work"/classes*.dex 2>/dev/null | wc -l | tr -d ' ')
+if [ "$ndex" = "0" ]; then
+	echo "fetch-lingo-skb: no classes*.dex in APK" >&2
+	exit 1
+fi
+rm -f "$assets/lingogks.jar"
+( cd "$work" && zip -q "$assets/lingogks.jar" classes*.dex )
+echo "fetch-lingo-skb: bundled $ndex dex file(s) into libre3/assets/lingogks.jar"
+ls -l "$assets/lingogks.jar"
