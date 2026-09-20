@@ -85,7 +85,7 @@ public class Libre3GattCallback extends SuperGattCallback {
     // and 3 for Abbott Lingo; when >=2 the handshake runs through Abbott's white-box
     // (lingoskb) instead of Juggluco's clean-room native crypto. The version is set by
     // Libre3.libre3NFC (Libre3.pendingLingoSecurityVersion) when a Lingo sensor is scanned.
-    private final int securityVersion;
+    private int securityVersion=1;
     private LingoSKB lingoskb=null;
 private final Queue<byte[]> sendqueue = new ConcurrentLinkedQueue<byte[]>();
 private int    lastEventReceived=0;
@@ -118,9 +118,6 @@ void free() {
         super(SerialNumber,dataptr,3);
         {if(doLog) {Log.format(LOG_ID+" "+ SerialNumber + ": "+ "Libre3GattCallback(0x%x)\n",dataptr);};};
         sensorptr = Natives.getsensorptr(dataptr);
-        securityVersion = (Libre3.pendingLingoSecurityVersion>=2) ? Libre3.pendingLingoSecurityVersion : 1;
-        // Lingo's realtime frame is 51 bytes plaintext (57 encrypted) vs Libre 3's 29 (35).
-        oneMinuteRawData = new byte[securityVersion>=2 ? 57 : 35];
 
         if(Thread.currentThread().equals( Looper.getMainLooper().getThread() )) {
             var thr=new Thread(()-> init());
@@ -683,7 +680,26 @@ private void logevent(byte[] value) {
             return;
     lastEventReceived=last;
     }
+// Resolve the Lingo securityVersion for THIS connection (not just at construction):
+// a persisted per-serial value first, else the transient scan flag, else Libre 3.
+// Runs on every connect (init is called from the ctor and on each reconnect), so a
+// scan or a restart is picked up, and the realtime buffer is sized to match.
+private void resolveSecurity() {
+    int v=Libre3.getPersistedLingoSecver(SerialNumber);
+    if(v<2 && Libre3.pendingLingoSecurityVersion>=2)
+        v=Libre3.pendingLingoSecurityVersion;
+    if(v<2)
+        v=1;
+    if(v>=2)
+        Libre3.setPersistedLingoSecver(SerialNumber,v);
+    if(v!=securityVersion || oneMinuteRawData==null) {
+        securityVersion=v;
+        oneMinuteRawData=new byte[v>=2 ? 57 : 35];
+        oneMinuteReadingSize=0;
+        }
+    }
 private void init() {
+    resolveSecurity();
     var exportedKAuth = Natives.getLibre3kAuth(sensorptr);
     if(!isPreAuthorized) {
         if(exportedKAuth!=null) {
@@ -1106,7 +1122,7 @@ private boolean    lastphase5=false;
 
     private int oneMinuteReadingSize = 0;
 //    private int oneMinutePacketNumber = 0;
-    private final byte[] oneMinuteRawData;
+    private byte[] oneMinuteRawData;
 
     @SuppressLint("MissingPermission")
 private long datatime=0L;

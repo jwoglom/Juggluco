@@ -40,6 +40,27 @@ private static final String LOG_ID="Libre3";
 private static final int PRODUCT_TYPE_LINGO=9;
 // Set on a Lingo scan; read by libre3 Libre3GattCallback to take the SecureKeyBox path.
 public static volatile int pendingLingoSecurityVersion=0;
+
+// Per-sensor Lingo securityVersion, persisted so a reconnect (or a launch after
+// a reboot) still takes the SecureKeyBox path without a fresh scan; the transient
+// pending flag alone is lost on restart and not seen by an already-built callback.
+private static final String LINGO_PREFS="lingo_secver";
+public static int getPersistedLingoSecver(String serial) {
+	try {
+		android.content.Context c=Applic.getContext();
+		if(c==null||serial==null) return 0;
+		return c.getSharedPreferences(LINGO_PREFS,android.content.Context.MODE_PRIVATE).getInt(serial,0);
+		}
+	catch(Throwable e) { return 0; }
+	}
+public static void setPersistedLingoSecver(String serial,int ver) {
+	try {
+		android.content.Context c=Applic.getContext();
+		if(c==null||serial==null) return;
+		c.getSharedPreferences(LINGO_PREFS,android.content.Context.MODE_PRIVATE).edit().putInt(serial,ver).apply();
+		}
+	catch(Throwable e) { }
+	}
 public static byte[] firstnfc(Tag tag) {
 	final byte[] firstcom={(byte)0x02,(byte)0xA1,(byte)0x7A};
     var res=AlgNfcV.wholenfccmd(tag,firstcom );
