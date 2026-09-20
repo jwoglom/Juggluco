@@ -81,6 +81,12 @@ public class Libre3GattCallback extends SuperGattCallback {
     private boolean isServicesDiscovered = false;
     private final long sensorptr;
     private long securityContext=0L;
+    // Lingo (Abbott SecureKeyBox) path. securityVersion is 1 for FreeStyle Libre 3
+    // and 3 for Abbott Lingo; when >=2 the handshake runs through Abbott's white-box
+    // (lingoskb) instead of Juggluco's clean-room native crypto. The version is set by
+    // Libre3.libre3NFC (Libre3.pendingLingoSecurityVersion) when a Lingo sensor is scanned.
+    private final int securityVersion;
+    private LingoSKB lingoskb=null;
 private final Queue<byte[]> sendqueue = new ConcurrentLinkedQueue<byte[]>();
 private int    lastEventReceived=0;
     private BluetoothGattCharacteristic gattCharPatchDataControl = null;
@@ -112,6 +118,7 @@ void free() {
         super(SerialNumber,dataptr,3);
         {if(doLog) {Log.format(LOG_ID+" "+ SerialNumber + ": "+ "Libre3GattCallback(0x%x)\n",dataptr);};};
         sensorptr = Natives.getsensorptr(dataptr);
+        securityVersion = (Libre3.pendingLingoSecurityVersion>=2) ? Libre3.pendingLingoSecurityVersion : 1;
 
         if(Thread.currentThread().equals( Looper.getMainLooper().getThread() )) {
             var thr=new Thread(()-> init());
@@ -386,7 +393,7 @@ private void mknonceback() {
 
 
 
-var encrypted = Natives.libre3EncryptChallengeReply(securityContext,nonce1,uit);
+var encrypted = lingoskb!=null ? lingoskb.encrypt(nonce1,uit) : Natives.libre3EncryptChallengeReply(securityContext,nonce1,uit);
 
 
 
@@ -406,7 +413,7 @@ private void challenge67() {
     byte[] nonce=new byte[7];
     arraycopy(rdtData,0,first,0,60);
     arraycopy(rdtData,60,nonce,0,7);
-    byte[] decr=Natives.libre3DecryptChallengeResponse(securityContext,nonce,first);
+    byte[] decr=lingoskb!=null ? lingoskb.decrypt(nonce,first) : Natives.libre3DecryptChallengeResponse(securityContext,nonce,first);
     Log.showbytes("challenge67 decr",decr);
     var backr2=copyOfRange(decr,0,16);
     if(!java.util.Arrays.equals(r2,backr2)) {
@@ -423,7 +430,7 @@ private void challenge67() {
     var kEnc=copyOfRange(decr,32,48);
     var ivEnc=copyOfRange(decr,48,56);
 //    byte[] AuthKey=KEYSCrypto.exportAuthorizationKey();
-    byte[] savedAuthorization=Natives.libre3ExportSavedAuthorization(securityContext);
+    byte[] savedAuthorization=lingoskb!=null ? lingoskb.exportAuthorizationKey() : Natives.libre3ExportSavedAuthorization(securityContext);
     Log.showbytes("challenge67 savedAuthorization",savedAuthorization);
     //securityContext=new BCrypt(kEnc,ivEnc);
     cryptptr=initcrypt(cryptptr,kEnc,ivEnc);
@@ -480,7 +487,7 @@ private boolean sendSecurityCommand(byte b) {
 private int commandphase=1;
 private void setCertificate140() {
     {if(doLog) {Log.i(LOG_ID, SerialNumber + ": "+"setCertificate140");};};
-    cryptolib.setPatchCertificate(securityContext,rdtData);
+    if(lingoskb!=null) lingoskb.setPatchCertificate(rdtData); else cryptolib.setPatchCertificate(securityContext,rdtData);
     if(sendSecurityCommand( (byte)0x0D)) {
         commandphase=4;
         }
@@ -488,7 +495,7 @@ private void setCertificate140() {
 private boolean    generateKAuth(byte[] input) {
     {if(doLog){showbytes(LOG_ID+ " "+SerialNumber +" generateKAuth",input);};}
     //Saves something?
-    return Natives.libre3DeriveAuthorizationRoot(securityContext,input)==1;
+    return lingoskb!=null ? lingoskb.generateKAuth(input) : (Natives.libre3DeriveAuthorizationRoot(securityContext,input)==1);
     }
 private boolean setCertificate65() {
     {if(doLog) {Log.i(LOG_ID, SerialNumber + ": "+"setCertificate65");};};
@@ -621,6 +628,15 @@ private void onConnectGatt() {
     isPreAuthorized=false;
     }
 private boolean initSecurityKeys(byte[] savedAuthorization,int level) {
+    if(securityVersion>=2) { // Lingo: drive Abbott's SecureKeyBox white-box
+        if(lingoskb==null)
+            lingoskb=LingoSKB.create(Applic.getContext());
+        if(lingoskb==null) {
+            setfailure("Lingo SecureKeyBox unavailable");
+            return false;
+            }
+        return lingoskb.initECDH(savedAuthorization,securityVersion);
+        }
     long context=Natives.libre3BeginSecurityHandshake(securityContext);
     if(context==0L) {
         securityContext=0L;
@@ -637,7 +653,7 @@ private void handleMSLibre3SecurityNotificationsEnabledEvent() {
         }
     else {
         var exportedKAuth = Natives.getLibre3kAuth(sensorptr);
-        if(initSecurityKeys(exportedKAuth,1)) {
+        if(initSecurityKeys(exportedKAuth,securityVersion)) {
             if(exportedKAuth==null) {
                 {if(doLog) {Log.i(LOG_ID, SerialNumber + ": "+"exportedKAuth==null");};};
                 sendSecurityCommand(1);
@@ -663,7 +679,7 @@ private void init() {
     var exportedKAuth = Natives.getLibre3kAuth(sensorptr);
     if(!isPreAuthorized) {
         if(exportedKAuth!=null) {
-            if(initSecurityKeys(exportedKAuth,1)) {
+            if(initSecurityKeys(exportedKAuth,securityVersion)) {
                 isPreAuthorized=true;
                 commandphase = 5;
                 }
@@ -939,7 +955,16 @@ private int getcomphase() {
     return commandphase;
     }
 private  byte[]           generateEphemeralKeys() {
-
+    if(lingoskb!=null) {
+        // The SecureKeyBox already returns the 65-byte uncompressed point (0x04 prefix).
+        var uit=lingoskb.generateEphemeralKeys();
+        if(uit==null || uit.length!=65) {
+            Log.e(LOG_ID, SerialNumber + ": lingo generateEphemeralKeys failed");
+            return null;
+            }
+        {if(doLog){showbytes(LOG_ID+ " "+SerialNumber + " generateEphemeralKeys()",uit);};}
+        return uit;
+        }
     var evikeys=Natives.libre3CreateEphemeralPublicKey(securityContext);
     if(evikeys==null || evikeys.length!=64) {
         Log.e(LOG_ID, SerialNumber + ": libre3CreateEphemeralPublicKey failed");
@@ -994,7 +1019,7 @@ private boolean    lastphase5=false;
                     ;
                     break;
                 case 2: {
-                    if(sendSecurityCert(cryptolib.getAppCertificate())) { //TODO what with failure?
+                    if(sendSecurityCert(lingoskb!=null ? lingoskb.getAppCertificate() : cryptolib.getAppCertificate())) { //TODO what with failure?
                         commandphase = 3;
                         }
                     else {

@@ -32,13 +32,16 @@ import static tk.glucodata.Log.showbytes;
 public class  Libre3 {
 private static final String LOG_ID="Libre3";
 // productType reported in the NFC patch info: FreeStyle Libre 3 = 4, Abbott
-// Lingo = 9. Lingo runs the same GKS stack but is re-keyed, and its app private
-// key lives in a WhiteCryption white-box, so standalone pairing is not yet
-// supported: we hold Lingo's app certificate (public) but not a software-usable
-// private key to answer the pairing challenge. Until that is resolved, detect a
-// Lingo sensor and stop before the activation write, since activating a sensor
-// cannot be undone.
+// Lingo = 9. Lingo runs the same GKS stack but is re-keyed, with its app private
+// key inside a WhiteCryption white-box, so it cannot be paired with Juggluco's
+// clean-room crypto. Instead the libre3 flavor drives Abbott's embedded
+// SecureKeyBox (LingoSKB); a Lingo scan records its securityVersion below so the
+// GATT handshake takes that path. Experimental, arm64 only.
 private static final int PRODUCT_TYPE_LINGO=9;
+// Set when a Lingo sensor is scanned; read by the libre3 Libre3GattCallback to
+// drive the SecureKeyBox handshake. Declared here (main source set) so it is
+// visible to all flavors without referencing a libre3-only class.
+public static volatile int pendingLingoSecurityVersion=0;
 public static byte[] firstnfc(Tag tag) {
 	final byte[] firstcom={(byte)0x02,(byte)0xA1,(byte)0x7A};
     var res=AlgNfcV.wholenfccmd(tag,firstcom );
@@ -74,12 +77,15 @@ public static	long   	libre3NFC(Tag tag) {
 			return 2L;
 			}
 		if(Natives.libre3PatchProductType(res)==PRODUCT_TYPE_LINGO) {
-			// Abbott Lingo: unsupported for standalone pairing (see above).
-			// Stop before the activation write so the sensor is not burned.
-			final String msg="Abbott Lingo sensor detected; not supported (standalone pairing is blocked). Not activating.";
+			// Abbott Lingo: experimental standalone pairing via the embedded
+			// SecureKeyBox. Record the securityVersion so the GATT handshake drives
+			// the white-box (LingoSKB) instead of the clean-room native crypto, then
+			// proceed with activation + pairing.
+			final int secver=Natives.logLibre3PatchInfo(res);
+			pendingLingoSecurityVersion = secver>=2 ? secver : 3;
+			final String msg="Abbott Lingo sensor detected (securityVersion "+secver+"); using SecureKeyBox pairing path";
 			Log.i(LOG_ID,msg);
 			android.util.Log.i(LOG_ID,msg);
-			return 2L;
 			}
 		long streamptr=tk.glucodata.libre3.NFC.second(res,tag);
 //		SensorBluetooth.resetDevice(streamptr);
