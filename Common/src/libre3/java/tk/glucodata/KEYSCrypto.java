@@ -54,8 +54,15 @@ final private static int max_keys=2;
 private int securityVersion;
 public boolean initKEYS(long securityContext,byte[] op,int level) {
 	info(LOG_ID+"::initKEYS start");
-	if(level>= max_keys)
-		return true;
+	if(level>= max_keys) {
+		// No app key/certificate exists for this index, so selection cannot
+		// succeed. Report failure rather than a false success: returning true
+		// here would let the handshake proceed with no key selected (e.g. if a
+		// sensor's securityVersion were ever plumbed straight through as the
+		// level), which then fails later with no clear cause.
+		Log.e(LOG_ID,"initKEYS: no app key for level "+level+" (max "+max_keys+")");
+		return false;
+		}
 	securityVersion=level;
 	return Natives.libre3SelectAppKeyAndSavedAuthorization(securityContext,level,op)==1;
 }

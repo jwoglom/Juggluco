@@ -67,7 +67,7 @@ set(EXTRAVIEW ${NETDIR}/libreview/putsensor.cpp ${NETDIR}/libreview/mkrealhistor
 
 #set(LIBRE3FILES ${INCLUDESELF}/libre3/loadlibs.cpp ${INCLUDESELF}/libre3/bluetooth.cpp ${INCLUDESELF}/libre3/nfc.cpp ${INCLUDESELF}/libre3/libre3_old_policy_bypass.c ) # ${INCLUDESELF}/libre3/libre3_postgen_dump.cpp )
 if(libre3)
-    set(LIBRE3FILES ${INCLUDESELF}/libre3/loadlibs.cpp ${INCLUDESELF}/libre3/bluetooth.cpp ${INCLUDESELF}/libre3/nfc.cpp  ) # ${INCLUDESELF}/libre3/libre3_postgen_dump.cpp )
+    set(LIBRE3FILES ${INCLUDESELF}/libre3/loadlibs.cpp ${INCLUDESELF}/libre3/bluetooth.cpp ${INCLUDESELF}/libre3/nfc.cpp ${INCLUDESELF}/libre3/lingo_realtime.c  ) # ${INCLUDESELF}/libre3/libre3_postgen_dump.cpp )
 endif()
 
 

@@ -589,7 +589,13 @@ public static native long getLibre3secs(byte[]  nfc1ar);
 public static native long getLibre3Sensorptr(String sensorid,long starttime);
 public static native long getLibre3SensorptrPD(String sensorid,long starttime,byte[] pin,String deviceaddress);
 public static native long saveLibre3MinuteL(long sensorptr,byte[] mindata,long nowmsec);
+public static native long saveLingoMinuteL(long sensorptr,byte[] mindata,long nowmsec);
+public static native void setLibre3Lingo(long sensorptr);
 public static native boolean saveLibre3fastData(long sensorptr,byte[] mindata);
+public static native boolean saveLingoHistory(long sensorptr,byte[] history);
+public static native boolean saveLingoFastData(long sensorptr,byte[] fastdata);
+public static native byte[] lingoControlHistory(int arg,int from);
+public static native byte[] lingoClinicalControl(int arg,int from);
 public static native boolean saveLibre3History(long sensorptr,byte[] mindata);
 public static native int libre3EventLog(long sensorptr,byte[] logs);
 public static native void setLibre3kAuth(long sensorptr,byte[] kauthin);
@@ -619,6 +625,9 @@ public static native int startTimeIDsum(byte[] uit, long time, long accountID);
 /** Decode and log the Libre 3 family patch info read over NFC, without writing
  * to the sensor. Returns the security version, or -1 if it cannot be parsed. */
 public static native int logLibre3PatchInfo(byte[] patchInfo);
+/** Return the patch info's productType (FreeStyle Libre 3 = 4, Abbott Lingo = 9),
+ * or -1 if it cannot be parsed. Reads only the already-fetched patch info. */
+public static native int libre3PatchProductType(byte[] patchInfo);
 
 
 

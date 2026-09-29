@@ -59,6 +59,10 @@
 -whyareyoukeeping class com.google.android.gms.auth.api.signin.*
 -whyareyoukeeping class com.google.android.gms.dynamite.*
 
+# Lingo SKB natives up-call com.adc.dcs.core.MSLog by name; keep our no-op shim
+# (class + method names) so R8 can't strip or rename it. Inert in other flavors.
+-keep class com.adc.dcs.core.MSLog { *; }
+
 -renamesourcefileattribute SourceFile
 -keepattributes SourceFile,LineNumberTable
 -printmapping printmappingout.txt
