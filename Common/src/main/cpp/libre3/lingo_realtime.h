@@ -25,12 +25,9 @@
  * the per-channel analyte type in a nibble-packed byte.  See
  * lingo-apk/docs/LINGO_PROTOCOL.md section 7.
  *
- * This decoder is deliberately standalone and is NOT yet wired into the live
- * glucose path: Lingo pairing is blocked by the WhiteCryption white-box (the app
- * private key never leaves it), so there is no in-app source of decrypted Lingo
- * frames yet.  The decoder is verified against real captured plaintext in
- * lingo_realtime_test.c and is ready to wire once a data path (companion key
- * injection) exists.
+ * saveLingoMinuteL maps this decoder's glucose, rate and trend fields into the
+ * existing Libre 3 storage path. The decoder can also be tested on the host
+ * without the authentication libraries.
  *
  * Field layout is reproduced from the decompiled Lingo app and confirmed byte
  * for byte against captured frames, including real warmed-up readings that match
@@ -74,6 +71,11 @@ typedef struct {
                                       channel is a glucose channel — e.g. during
                                       warm-up.  Never emit a value when false. */
     uint16_t glucose_mgdl;         /* current capped glucose, mg/dL (scale 1) */
+
+    int16_t  rate_of_change;       /* signed 0.01 mg/dL/min; -32768 = unknown */
+    uint8_t  trend;                /* 0 unknown, 1 falling quickly, 2 falling,
+                                     3 stable, 4 rising, 5 rising quickly;
+                                     excludes the actionable bit (0x08) */
 
     bool     historic_valid;       /* false when the historic reading carries the
                                       data-quality flag; valid even when the

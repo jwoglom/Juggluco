@@ -127,7 +127,7 @@ android {
         //compileSdk 36
         applicationId "tk.glucodata"
 
-         versionName '11.0.2'
+         versionName (project.findProperty('lingoDiagnostics') == '1' ? '11.0.2-lingodiag1' : '11.0.2')
 //    multiDexEnabled true
 
         buildConfigField 'int', 'isRelease', '0'
@@ -140,6 +140,10 @@ android {
         // it, since a wrong activation cannot be undone.
         buildConfigField 'int', 'nfcProbeOnly',
             (project.findProperty('nfcProbeOnly') == '1' ? '1' : '0')
+
+        // Dedicated diagnostic APK; no capture in ordinary builds.
+        buildConfigField 'int', 'lingoDiagnostics',
+            (project.findProperty('lingoDiagnostics') == '1' ? '1' : '0')
 
         externalNativeBuild {
             cmake {
@@ -154,7 +158,10 @@ android {
 //    resourceConfigurations += ["en", "nl", "fr","it", "de", "pl", "pt","be","uk"]
     //ndk { abiFilters  'armeabi-v7a' }
       // ndk { abiFilters  'arm64-v8a' }
-      ndk { abiFilters  'armeabi-v7a',   'arm64-v8a' }
+      ndk {
+          if (project.findProperty('lingoDiagnostics') == '1') abiFilters 'arm64-v8a'
+          else abiFilters 'armeabi-v7a', 'arm64-v8a'
+      }
         signingConfig signingConfigs.alg
     //buildToolsVersion '33.0.0'
     }
@@ -639,7 +646,8 @@ buildTypes {
                     GenerateBuildTimeTask::getOutputDirectory)
         })
     }
-    compileSdkMinor 0
+    // Use the base android-36 platform declared above. An explicit minor 0
+    // requests android-36.0, which the SDK 36 package does not provide.
 }
 
 allprojects {

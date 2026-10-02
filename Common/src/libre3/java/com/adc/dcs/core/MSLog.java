@@ -19,7 +19,7 @@
 package com.adc.dcs.core;
 
 /*
- * No-op replacement for Abbott's com.adc.dcs.core.MSLog.
+ * Diagnostic-aware replacement for Abbott's com.adc.dcs.core.MSLog.
  *
  * The SecureKeyBox native libraries (loaded from the Lingo classes via a
  * DexClassLoader whose parent is this app's class loader) call back into
@@ -30,13 +30,13 @@ package com.adc.dcs.core;
  * Because a DexClassLoader delegates to its parent first, defining MSLog here —
  * in Juggluco's own class loader, with the same package/class name and the same
  * (bytecode) method names v/e/i/w/g — shadows the copy in the Lingo dex, so the
- * native code's log up-calls resolve to these harmless no-ops and the crypto
+ * native code's log up-calls resolve to these harmless logging calls (no-ops in ordinary builds) and the crypto
  * proceeds. This class is only referenced by the Lingo SecureKeyBox path.
  */
 public class MSLog {
-    public static void v(String tag, String msg) { }
-    public static void e(String tag, String msg) { }
-    public static void i(String tag, String msg) { }
-    public static void w(String tag, String msg) { }
-    public static void g(String tag, String msg) { }
+    public static void v(String tag, String msg) { tk.glucodata.LingoDiagnostics.vendorLog("v", tag, msg); }
+    public static void e(String tag, String msg) { tk.glucodata.LingoDiagnostics.vendorLog("e", tag, msg); }
+    public static void i(String tag, String msg) { tk.glucodata.LingoDiagnostics.vendorLog("i", tag, msg); }
+    public static void w(String tag, String msg) { tk.glucodata.LingoDiagnostics.vendorLog("w", tag, msg); }
+    public static void g(String tag, String msg) { tk.glucodata.LingoDiagnostics.vendorLog("g", tag, msg); }
 }

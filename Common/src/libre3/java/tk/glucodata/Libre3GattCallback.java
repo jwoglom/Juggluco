@@ -635,7 +635,7 @@ private void onConnectGatt() {
 private boolean initSecurityKeys(byte[] savedAuthorization,int level) {
     if(securityVersion>=2) { // Lingo: drive Abbott's SecureKeyBox white-box
         if(lingoskb==null)
-            lingoskb=LingoSKB.create(Applic.getContext());
+            lingoskb=LingoSKB.create(Applic.getContext(), SerialNumber);
         if(lingoskb==null) {
             setfailure("Lingo SecureKeyBox unavailable");
             return false;
@@ -652,12 +652,21 @@ private boolean initSecurityKeys(byte[] savedAuthorization,int level) {
     }
 private void handleMSLibre3SecurityNotificationsEnabledEvent() {
     {if(doLog) {Log.i(LOG_ID, SerialNumber + ": "+"handleMSLibre3SecurityNotificationsEnabledEvent");};};
+    final boolean diagnosticFresh = securityVersion >= 2 && LingoDiagnostics.consumeFresh(SerialNumber);
+    if(diagnosticFresh) isPreAuthorized=false;
     if(isPreAuthorized) {
         //securityState=2;
         sendSecurityCommand(17);
         }
     else {
         var exportedKAuth = Natives.getLibre3kAuth(sensorptr);
+        if(diagnosticFresh) {
+            LingoDiagnostics.event("", "fresh_authentication", "sensorSerial", SerialNumber,
+                    "savedAuthorizationPreserved", exportedKAuth, "securityVersion", securityVersion);
+            // Only bypass this import. Keep the stored authorization until the
+            // existing successful-authentication path replaces it.
+            exportedKAuth = null;
+        }
         if(initSecurityKeys(exportedKAuth,securityVersion)) {
             if(exportedKAuth==null) {
                 {if(doLog) {Log.i(LOG_ID, SerialNumber + ": "+"exportedKAuth==null");};};
@@ -1137,6 +1146,7 @@ private    void glucose_data(byte[] value,long timmsec) {
         if(oneMinuteReadingSize >= oneMinuteRawData.length) {
            this.oneMinuteReadingSize = 0;
            byte[] decr = intDecrypt(cryptptr,3, oneMinuteRawData);
+           if(lingoskb != null) lingoskb.recordRealtime(oneMinuteRawData, decr, timmsec);
            if(decr == null) {
                 Log.e(LOG_ID, SerialNumber + ": "+"intDecrypt(cryptptr,3, oneMinuteRawData)==null");
                 return;

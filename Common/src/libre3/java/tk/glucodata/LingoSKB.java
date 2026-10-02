@@ -32,10 +32,9 @@ import dalvik.system.DexClassLoader;
 /*
  * Bridge to Abbott's SecureKeyBox (SKB) white-box for Abbott Lingo pairing.
  *
- * Lingo is the same GKS / FreeStyle Libre 3 stack but re-keyed, and its app
- * private key never leaves the WhiteCryption white-box, so — unlike Libre 3 —
- * Juggluco cannot reproduce the handshake crypto in its own native code. Instead
- * it drives Abbott's own SKB libraries, the same way it uses Abbott's
+ * Lingo uses the GKS / FreeStyle Libre 3 stack with different credentials.
+ * An independent Lingo authentication implementation is not yet established.
+ * This bridge drives Abbott's own SKB libraries, the same way Juggluco uses Abbott's
  * libcalibrate.so for Libre calibration.
  *
  * The three SKB libraries (libgks_skbwrapper.so, libSecureKeyBoxJava.so,
@@ -69,35 +68,43 @@ class LingoSKB {
      * libraries shipped in this app. Returns null (logging why) if the SKB is
      * not present in this build or fails to initialise, so callers can fall back.
      */
-    static LingoSKB create(Context context) {
+    static LingoSKB create(Context context, String serial) {
+        LingoDiagnostics.start(context);
+        String diagnosticContext = LingoDiagnostics.newContext(serial);
         try {
             final File jar = new File(context.getCodeCacheDir(), DEX_ASSET);
             copyAssetIfNeeded(context, DEX_ASSET, jar);
             final String optimizedDir = context.getCodeCacheDir().getAbsolutePath();
             final String nativeLibDir = context.getApplicationInfo().nativeLibraryDir;
-            return new LingoSKB(jar.getAbsolutePath(), optimizedDir, nativeLibDir);
+            return new LingoSKB(jar.getAbsolutePath(), optimizedDir, nativeLibDir, diagnosticContext);
         } catch (Throwable e) {
+            LingoDiagnostics.event(diagnosticContext, "create_failed", "error", e.toString());
             Log.e(LOG_ID, "create failed (Lingo SecureKeyBox unavailable): " + e);
             return null;
         }
     }
 
-    private static void copyAssetIfNeeded(Context context, String asset, File out)
+    private static synchronized void copyAssetIfNeeded(Context context, String asset, File out)
             throws Exception {
-        // The asset is immutable per build; copy once. A size check catches an
-        // upgrade that replaced the bundled dex.
-        long assetLen = -1;
-        try { assetLen = context.getAssets().openFd(asset).getLength(); }
-        catch (Exception ignore) { /* not all builds mark length; fall through */ }
-        if (out.exists() && assetLen >= 0 && out.length() == assetLen) return;
+        // Recreate the bundled code once per process, including after upgrades.
+        // Android 14+ requires dynamically loaded code to be read-only.
+        if (assetCopied && out.exists()) return;
+        if (out.exists() && !out.delete()) throw new java.io.IOException("Cannot replace " + out);
         try (InputStream in = context.getAssets().open(asset);
              OutputStream os = new FileOutputStream(out)) {
+            if (!out.setReadOnly()) throw new java.io.IOException("Cannot make dex read-only");
             final byte[] buf = new byte[1 << 16];
             int n;
             while ((n = in.read(buf)) > 0) os.write(buf, 0, n);
         }
+        assetCopied = true;
     }
+    private static boolean assetCopied;
 
+    private final String diagnosticContext;
+    private int realtimeSamples;
+    private boolean fullAuthentication;
+    private final Class<?> credentialsClass;
     private final Object crypto;                 // GKSSKBCryptoLib instance
     private final Method mGetAppCertificate;
     private final Method mInitECDH;              // (byte[] savedAuthorization, int securityVersion)
@@ -115,7 +122,8 @@ class LingoSKB {
      * @param nativeLibDir   directory holding the SKB .so (the app's nativeLibraryDir)
      * @throws Exception if the SKB or its classes are unavailable / fail to init
      */
-    LingoSKB(String dexPath, String optimizedDir, String nativeLibDir) throws Exception {
+    LingoSKB(String dexPath, String optimizedDir, String nativeLibDir, String diagnosticContext) throws Exception {
+        this.diagnosticContext = diagnosticContext;
         final ClassLoader parent = LingoSKB.class.getClassLoader();
 
         // Load our no-op MSLog in the parent loader so it shadows the Lingo dex's
@@ -127,7 +135,8 @@ class LingoSKB {
 
         // Initialising GKSSecurityCredentials runs the self-decrypting loader and
         // $gksdcm$COI(), which loads the .so and fills the key table.
-        Class.forName(PKG + "GKSSecurityCredentials", true, loader);
+        credentialsClass = Class.forName(PKG + "GKSSecurityCredentials", true, loader);
+        LingoDiagnostics.fields(diagnosticContext, "credentials_initialized", credentialsClass, null);
 
         final Class<?> skbCls = Class.forName(PKG + "GKSSKBCryptoLib", true, loader);
         final Constructor<?> ctor = skbCls.getDeclaredConstructor();
@@ -145,63 +154,98 @@ class LingoSKB {
         mGetKeyIndexFromVersion= skbCls.getDeclaredMethod("getKeyIndexFromVersion", int.class);
         mGetKeyIndexFromVersion.setAccessible(true);
 
+        LingoDiagnostics.fields(diagnosticContext, "crypto_constructed", skbCls, crypto);
+        LingoDiagnostics.loaded(diagnosticContext, dexPath, nativeLibDir);
         info(LOG_ID + ": SecureKeyBox ready");
     }
 
     /** The securityVersion->key-index map inside the white-box; -1 on error. */
     int getKeyIndexFromVersion(int securityVersion) {
         try {
-            return (Integer) mGetKeyIndexFromVersion.invoke(crypto, securityVersion);
+            return (Integer) invoke(mGetKeyIndexFromVersion, securityVersion);
         } catch (Throwable e) { err("getKeyIndexFromVersion", e); return -1; }
     }
 
     /** Begin ECDH for the given securityVersion; savedAuthorization may be null. */
     boolean initECDH(byte[] savedAuthorization, int securityVersion) {
         try {
-            return (Boolean) mInitECDH.invoke(crypto, savedAuthorization, securityVersion);
+            return (Boolean) invoke(mInitECDH, savedAuthorization, securityVersion);
         } catch (Throwable e) { err("initECDH", e); return false; }
     }
 
     /** The 162-byte app certificate to send to the sensor; null on error. */
     byte[] getAppCertificate() {
-        try { return (byte[]) mGetAppCertificate.invoke(crypto); }
+        try { return (byte[]) invoke(mGetAppCertificate); }
         catch (Throwable e) { err("getAppCertificate", e); return null; }
     }
 
     /** Accept and verify the sensor's (patch) certificate. */
     boolean setPatchCertificate(byte[] patchCertificate) {
-        try { return (Boolean) mSetPatchCertificate.invoke(crypto, (Object) patchCertificate); }
+        try { return (Boolean) invoke(mSetPatchCertificate, (Object) patchCertificate); }
         catch (Throwable e) { err("setPatchCertificate", e); return false; }
     }
 
     /** Generate the app ephemeral key pair and return its public key; null on error. */
     byte[] generateEphemeralKeys() {
-        try { return (byte[]) mGenerateEphemeralKeys.invoke(crypto); }
+        try { return (byte[]) invoke(mGenerateEphemeralKeys); }
         catch (Throwable e) { err("generateEphemeralKeys", e); return null; }
     }
 
     /** Complete ECDH with the sensor's ephemeral public key, deriving kAuth. */
     boolean generateKAuth(byte[] patchEphemeralPublicKey) {
-        try { return (Boolean) mGenerateKAuth.invoke(crypto, (Object) patchEphemeralPublicKey); }
+        try { return (Boolean) invoke(mGenerateKAuth, (Object) patchEphemeralPublicKey); }
         catch (Throwable e) { err("generateKAuth", e); return false; }
     }
 
     /** AES-CCM encrypt the authorization challenge reply; null on error. */
     byte[] encrypt(byte[] nonce, byte[] plaintext) {
-        try { return (byte[]) mEncrypt.invoke(crypto, nonce, plaintext); }
+        try { return (byte[]) invoke(mEncrypt, nonce, plaintext); }
         catch (Throwable e) { err("encrypt", e); return null; }
     }
 
     /** AES-CCM decrypt the authorization challenge response; null on error. */
     byte[] decrypt(byte[] nonce, byte[] ciphertext) {
-        try { return (byte[]) mDecrypt.invoke(crypto, nonce, ciphertext); }
+        try { return (byte[]) invoke(mDecrypt, nonce, ciphertext); }
         catch (Throwable e) { err("decrypt", e); return null; }
     }
 
     /** The persistent fast-reconnect blob (kAuth); null on error. */
     byte[] exportAuthorizationKey() {
-        try { return (byte[]) mExportAuthorizationKey.invoke(crypto); }
+        try { return (byte[]) invoke(mExportAuthorizationKey); }
         catch (Throwable e) { err("exportAuthorizationKey", e); return null; }
+    }
+
+    private Object invoke(Method method, Object... args) throws Throwable {
+        if (!LingoDiagnostics.enabled()) return method.invoke(crypto, args);
+        long call = LingoDiagnostics.callStart(diagnosticContext, method.getName(), args);
+        long started = android.os.SystemClock.elapsedRealtimeNanos();
+        Object result = null;
+        Throwable error = null;
+        try {
+            result = method.invoke(crypto, args);
+            return result;
+        } catch (Throwable e) {
+            error = e instanceof java.lang.reflect.InvocationTargetException && e.getCause() != null ? e.getCause() : e;
+            throw e;
+        } finally {
+            LingoDiagnostics.callEnd(diagnosticContext, call, method.getName(), result, args,
+                    android.os.SystemClock.elapsedRealtimeNanos() - started, error);
+            if (method == mInitECDH) {
+                realtimeSamples = 0;
+                fullAuthentication = args.length > 0 && args[0] == null;
+                LingoDiagnostics.fields(diagnosticContext, "credentials_after_initECDH", credentialsClass, null);
+            }
+            if (method == mInitECDH || method == mGenerateKAuth || method == mExportAuthorizationKey)
+                LingoDiagnostics.fields(diagnosticContext, method.getName(), crypto.getClass(), crypto);
+            if (method == mExportAuthorizationKey && result instanceof byte[])
+                LingoDiagnostics.snapshot(diagnosticContext, fullAuthentication ? "full-authenticated" : "resumed-authenticated");
+        }
+    }
+
+    void recordRealtime(byte[] encrypted, byte[] clear, long timeMs) {
+        if (LingoDiagnostics.enabled() && realtimeSamples++ < 8)
+            LingoDiagnostics.event(diagnosticContext, "realtime", "timeReceivedMs", timeMs,
+                    "encrypted", encrypted, "clear", clear);
     }
 
     private static void info(String s) { if (Log.doLog) Log.i(LOG_ID, s); }

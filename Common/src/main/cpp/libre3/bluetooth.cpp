@@ -221,11 +221,8 @@ static jlong save3current(SensorGlucoseData *sens, const oneminute *minptr,uint3
 #endif
     if(validglucosevalue(curval)) {
         sens->sensorerror=false;
-        int16_t rateofchange=minptr->rateOfChange;
-        if(rateofchange==-32768) {
-            rateofchange=trend2rate(minptr->trend);
-            }
-        const float rate= rateofchange/100.0f;
+        const int16_t rateofchange=minptr->rateOfChange;
+        const float rate=rateofchange==-32768 ? trend2rate(minptr->trend) : rateofchange/100.0f;
         sens->savepollallIDs<60>(now,minptr->lifeCount,curval,minptr->trend,rate);
         res=glucoseback(now,curval,rate,sens);
         sens->consecutivelifecount();
@@ -355,7 +352,8 @@ extern "C" JNIEXPORT  jlong JNICALL fromjava(saveLingoMinuteL)(JNIEnv *env, jcla
     oneminute om{};
     om.lifeCount=r.life_count;
     om.readingMgDl=r.glucose_valid?r.glucose_mgdl:0;
-    om.rateOfChange=-32768;                 // unknown -> save3current uses trend
+    om.rateOfChange=r.rate_of_change;
+    om.trend=r.trend;
     om.historicalLifeCount=r.historic_life_count;
     om.historicalReading=r.historic_valid?r.historic_mgdl:0;
     om.uncappedCurrentMgDl=r.uncapped_glucose_valid?r.uncapped_glucose_mgdl:0;

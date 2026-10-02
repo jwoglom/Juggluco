@@ -39,9 +39,10 @@
  * are taken verbatim from the decompiled GlucoseKetoneSPL.parseOneMinuteISFReading /
  * parseAnalyte / parseMeasurement, and the glucose value is validated against real
  * warmed-up captures (201 mg/dL, matching the Lingo app) in lingo_realtime_test.c.
- * Only glucose + temperature are decoded here; the other per-analyte fields
- * (rate, projected, historic, uncapped) have known offsets, below, but are not
- * emitted until validated against real non-warm-up values.
+ * For glucose, rate is a signed little-endian short in 0.01 mg/dL/min, with
+ * 0x8000 meaning unknown. The trend is the low three bits at ACTIONABLE_TREND;
+ * bit 3 is a separate actionable flag. These fields use the same units/codes
+ * as Libre 3 and are confirmed by GlucoseKetoneSPL.parseAnalyte in Lingo 6725.
  */
 #define OFF_LIFECOUNT        0
 #define OFF_HIST_LIFECOUNT   2
@@ -51,12 +52,13 @@
 #define FIRST_ANALYTE_OFFSET 4
 #define ANALYTE_LEN          15
 
-/* Analyte-block-relative field offsets (GlucoseKetoneSPL constants). Only
- * RESULT_CAPPED is consumed today; the rest are recorded for future use.
+/* Analyte-block-relative field offsets (GlucoseKetoneSPL constants).
  *   RESULT_CAPPED=0 RATE_OF_CHANGE=2 EXTENDED_CODE=4 PROJECTED=6
  *   HISTORIC_CAPPED=8 ACTIONABLE_TREND=10 RESULT_UNCAPPED=11 HISTORIC_UNCAPPED=13 */
 #define ANALYTE_RESULT_CAPPED     0
+#define ANALYTE_RATE_OF_CHANGE    2
 #define ANALYTE_HISTORIC_CAPPED   8
+#define ANALYTE_ACTIONABLE_TREND  10
 #define ANALYTE_RESULT_UNCAPPED   11
 #define ANALYTE_HISTORIC_UNCAPPED 13
 
@@ -85,6 +87,8 @@ int lingo_parse_realtime(const uint8_t *plain, size_t len, lingo_realtime_t *out
      * carries glucose. */
     out->glucose_valid = false;
     out->glucose_mgdl = 0;
+    out->rate_of_change = -32768;
+    out->trend = 0;
     out->historic_valid = false;
     out->historic_mgdl = 0;
     out->uncapped_glucose_valid = false;
@@ -100,6 +104,9 @@ int lingo_parse_realtime(const uint8_t *plain, size_t len, lingo_realtime_t *out
             out->glucose_valid = true;
             out->glucose_mgdl = (uint16_t)(capped & READING_MASK);
         }
+        out->rate_of_change = (int16_t)rd_u16le(plain + start + ANALYTE_RATE_OF_CHANGE);
+        const uint8_t trend = plain[start + ANALYTE_ACTIONABLE_TREND] & 0x07u;
+        out->trend = trend <= 5 ? trend : 0;
         /* Historic capped reading; valid during warm-up even when the current
          * reading is not, so a fresh session can still show recent history. */
         const uint16_t hist = rd_u16le(plain + start + ANALYTE_HISTORIC_CAPPED);

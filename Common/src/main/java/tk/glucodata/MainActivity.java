@@ -1544,6 +1544,7 @@ public static final int REQUEST_LIB=0x200;
 public static final int REQUEST_MASK=0xFFFFFF00;
 public static final int IGNORE_BATTERY_OPTIMIZATION_SETTINGS=0x100;
 static final int OVERLAY_PERMISSION_REQUEST_CODE=0x40;
+public static final int REQUEST_SAVE_LINGO=0x304;
 public static final int REQUEST_SAVE_LOG=0x300;
 public static final int REQUEST_SAVE_LOGCAT=0x301;
 public static final int REQUEST_WEBPAGES=0x302;
@@ -1655,6 +1656,11 @@ protected void onActivityResult(int requestCode, int resultCode, Intent data) {
             WebPageUpload.onActivityResult(this,requestCode,resultCode,data);
             return;
         }
+    case REQUEST_SAVE_LINGO: {
+        if(resultCode == Activity.RESULT_OK && data != null && data.getData() != null)
+            LingoDiagnostics.export(this, data.getData());
+        return;
+    }
     case REQUEST_SAVE_LOGCAT: 
     case REQUEST_SAVE_LOG: {
             if(resultCode == Activity.RESULT_OK) {

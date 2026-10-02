@@ -38,6 +38,7 @@
 #ifdef LINGO_REALTIME_SELFTEST
 
 #include "lingo_realtime.h"
+#include <assert.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -98,6 +99,9 @@ int main(void) {
         if (r.glucose_valid) {
             ok = 0; printf("[%s] glucose_valid true on warm-up frame\n", v->name);
         }
+        if (r.rate_of_change != -32768 || r.trend != 0) {
+            ok = 0; printf("[%s] rate/trend present on warm-up frame\n", v->name);
+        }
         /* Warm-up temperature is 0x8000 (invalid). */
         if (r.temperature_valid) {
             ok = 0; printf("[%s] temperature_valid true on warm-up frame\n", v->name);
@@ -151,6 +155,61 @@ int main(void) {
                r.channel0_type, r.glucose_valid, r.glucose_mgdl, ok ? "OK" : "FAIL");
         if (!ok) failures++;
     }
+
+    /* Real frames from lastunixtime.txt. The rate and low-three-bit trend must
+     * survive independently: lc15175 has an unknown rate but a stable arrow. */
+    static const struct {
+        const char *hex;
+        int16_t rate;
+        uint8_t trend;
+    } TRENDS[] = {
+        {"0938F5370080EDFF0000FFFF00800B008000809D00EDFF0000283C9C000B9D009C0010000000806E0024074F48091100080000", -19, 3},
+        {"4438313800808EFF0000FFFF00800A0080008089008EFF0000E02EAC000A8900AC001000000F0C7000C90609495D1000000000", -114, 2},
+        {"49383638008034FF0000FFFF00800900800080780034FF0000C422A300097800A300100000100C710063060F49E70F00000000", -204, 1},
+        {"BB3AA73A008000010000FFFF00800D008000809E0000010000904C63000D9E006300100000040B70004F052243F41100000000", 256, 5},
+        {"473B333B008000800000FFFF00800B008000809B0000800000FFFFC3000B9B00C300100000320C7100F007D3497C1100000000", -32768, 3},
+        {"3a002800008000800000ffff00800800800080c94000800000ffff008008c9000080100000d30c7000b808764de60e00000000", -32768, 0},
+    };
+    for (size_t i = 0; i < sizeof(TRENDS) / sizeof(TRENDS[0]); i++) {
+        uint8_t buf[LINGO_REALTIME_LEN];
+        const size_t len = unhex(TRENDS[i].hex, buf, sizeof(buf));
+        lingo_realtime_t r;
+        assert(lingo_parse_realtime(buf, len, &r) == 0);
+        assert(r.rate_of_change == TRENDS[i].rate && r.trend == TRENDS[i].trend);
+        /* Swap the entire analyte blocks; inactive channel data must never be
+         * used for glucose's rate or trend. */
+        uint8_t tmp[15];
+        memcpy(tmp, buf + 4, sizeof(tmp));
+        memcpy(buf + 4, buf + 19, sizeof(tmp));
+        memcpy(buf + 19, tmp, sizeof(tmp));
+        buf[34] = 0x01;
+        buf[21] = 0x7b; buf[22] = 0x00; buf[29] = 0x0c;
+        assert(lingo_parse_realtime(buf, len, &r) == 0);
+        assert(r.rate_of_change == TRENDS[i].rate && r.trend == TRENDS[i].trend);
+    }
+    {
+        uint8_t buf[LINGO_REALTIME_LEN];
+        const size_t len = unhex(TRENDS[0].hex, buf, sizeof(buf));
+        lingo_realtime_t r;
+        /* Positive signed rate, rising arrow, and all unrelated upper bits. */
+        buf[21] = 150; buf[22] = 0; buf[29] = 0xfc;
+        assert(lingo_parse_realtime(buf, len, &r) == 0);
+        assert(r.rate_of_change == 150 && r.trend == 4);
+        for (int reserved = 6; reserved <= 7; reserved++) {
+            buf[29] = (uint8_t)reserved;
+            assert(lingo_parse_realtime(buf, len, &r) == 0);
+            assert(r.trend == 0);
+        }
+        /* A reused output must not retain a prior channel's direction. */
+        buf[34] = 0x32; /* ketone + lactate, no glucose */
+        assert(lingo_parse_realtime(buf, len, &r) == 0);
+        assert(!r.glucose_valid && r.rate_of_change == -32768 && r.trend == 0);
+        assert(lingo_parse_realtime(NULL, len, &r) == -1);
+        assert(lingo_parse_realtime(buf, len, NULL) == -1);
+        assert(lingo_parse_realtime(buf, len - 1, &r) == -2);
+        assert(lingo_parse_realtime(buf, len + 1, &r) == -2);
+    }
+    printf("[rate/trend] captured frames, both channels, flags and invalid input: OK\n");
 
     if (failures) { printf("\n%d FAILURE(S)\n", failures); return 1; }
     printf("\nall lingo_realtime tests passed\n");

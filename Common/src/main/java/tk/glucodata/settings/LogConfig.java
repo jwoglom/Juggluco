@@ -37,7 +37,7 @@ private static void saveRequest(MainActivity context,String filename,int request
         Log.i(LOG_ID,"saveRequest "+filename);
         Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
-        intent.setType("*/*");
+        intent.setType(request == MainActivity.REQUEST_SAVE_LINGO ? "application/zip" : "*/*");
         intent.putExtra(Intent.EXTRA_TITLE, filename);
         intent.putExtra(Intent.EXTRA_LOCAL_ONLY, true);
         try {
@@ -57,6 +57,20 @@ private static void savelogcat(MainActivity context) {
         saveRequest(context,"logcat.txt", MainActivity.REQUEST_SAVE_LOGCAT);
            }
     }
+
+private static View[][] withDiagnostics(MainActivity act, View[]... rows) {
+    if (!tk.glucodata.LingoDiagnostics.enabled() || isWearable) return rows;
+    var full = getbutton(act, "Full Lingo authentication");
+    full.setOnClickListener(v -> tk.glucodata.LingoDiagnostics.requestFresh(act));
+    var save = getbutton(act, "Save Lingo diagnostics");
+    save.setOnClickListener(v -> saveRequest(act, "lingo-diagnostics.zip", MainActivity.REQUEST_SAVE_LINGO));
+    View[][] result = new View[rows.length + 2][];
+    System.arraycopy(rows, 0, result, 0, rows.length - 1);
+    result[rows.length - 1] = new View[]{full};
+    result[rows.length] = new View[]{save};
+    result[rows.length + 1] = rows[rows.length - 1];
+    return result;
+}
 
 static void make(MainActivity act,View parent) {
     if(doLog) {
@@ -125,9 +139,9 @@ static void make(MainActivity act,View parent) {
                  */
                 int[] ret={w,h};
                 return ret;
-                },new View[]{trace,delete,save},new View[] {log,sizelabel,size},
+                },withDiagnostics(act,new View[]{trace,delete,save},new View[] {log,sizelabel,size},
                 new View[]{logcat,deletelogcat,savelogcat},new View[] {logcaton,sizelabel2,logcatsize},
-                closerow);
+                closerow));
             alllayout=layout;
             layout.setBackgroundResource(R.drawable.dialogbackground);
            final   int pad=(int)(tk.glucodata.GlucoseCurve.metrics.density*9.0);
