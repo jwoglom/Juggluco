@@ -25,6 +25,10 @@ on:
         description: Fetch Abbott SecureKeyBox libs from the private lingo-apk repo (experimental Lingo build)
         default: false
         type: boolean
+      build_lingo_diagnostics:
+        description: Also build the -PlingoDiagnostics=1 Lingo capture APK (arm64 only; implies fetch_lingo_skb)
+        default: false
+        type: boolean
 
 env:
   # The task from the BUILD section of README.md: a logging mobile phone
@@ -42,7 +46,12 @@ env:
   # lingo-apk repo for the experimental Lingo path. Off unless explicitly
   # requested via workflow_dispatch, and only effective when the LINGO_SKB_TOKEN
   # secret is configured. The libraries are proprietary and never committed here.
-  FETCH_LINGO_SKB: ${{ github.event_name == 'workflow_dispatch' && inputs.fetch_lingo_skb }}
+  # The diagnostics APK wraps the SecureKeyBox calls, so requesting it also
+  # fetches those libraries.
+  FETCH_LINGO_SKB: ${{ github.event_name == 'workflow_dispatch' && (inputs.fetch_lingo_skb || inputs.build_lingo_diagnostics) }}
+  # Whether to also build the -PlingoDiagnostics=1 APK, see
+  # docs/LINGO_DIAGNOSTICS.md. Only via workflow_dispatch.
+  BUILD_LINGO_DIAGNOSTICS: ${{ github.event_name == 'workflow_dispatch' && inputs.build_lingo_diagnostics }}
   # Matches ndkver, CMAKEVERSION and compileSdk in Common/build.gradle.
   NDK_VERSION: '30.0.16138531'
   CMAKE_VERSION: '4.1.2'
@@ -172,4 +181,43 @@ jobs:
         with:
           name: juggluco-nfcprobe-${{ env.TASK }}
           path: build/nfc-probe/*.apk
+          if-no-files-found: error
+
+      # A third APK with BuildConfig.lingoDiagnostics == 1: version
+      # 11.0.2-lingodiag1, arm64 only, with the capture code and the two
+      # logging-screen buttons described in docs/LINGO_DIAGNOSTICS.md. Its
+      # captures contain secrets and sensor data, so it is for private testing.
+      - name: Check the Lingo SecureKeyBox inputs are present
+        if: env.BUILD_LINGO_DIAGNOSTICS == 'true'
+        run: |
+          # fetch-lingo-skb.sh skips quietly without the secret; the diagnostic
+          # APK is useless without these, so fail instead.
+          test -s Common/src/libre3/assets/lingogks.jar || {
+            echo "::error::lingogks.jar missing; is LINGO_REPO_READONLY_TOKEN set?"; exit 1; }
+          ls -l Common/src/libre3/jniLibs/arm64-v8a
+
+      - name: Build the Lingo diagnostics APK
+        if: env.BUILD_LINGO_DIAGNOSTICS == 'true'
+        run: |
+          # It reuses the task's output paths; clear them so only the
+          # diagnostic APK is collected below.
+          rm -rf Common/build/outputs/apk
+          ./gradlew --no-daemon --no-configuration-cache --stacktrace -PlingoDiagnostics=1 "$TASK"
+
+      - name: Collect the Lingo diagnostics APK
+        if: env.BUILD_LINGO_DIAGNOSTICS == 'true'
+        run: |
+          mkdir -p build/lingo-diagnostics
+          find Common/build/outputs/apk -name '*.apk' -print0 |
+            while IFS= read -r -d '' apk; do
+              cp "$apk" "build/lingo-diagnostics/lingodiag-$(basename "$apk")"
+            done
+          ls -l build/lingo-diagnostics
+
+      - name: Upload the Lingo diagnostics APK
+        if: env.BUILD_LINGO_DIAGNOSTICS == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: juggluco-lingodiag-${{ env.TASK }}
+          path: build/lingo-diagnostics/*.apk
           if-no-files-found: error
